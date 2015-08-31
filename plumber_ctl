@@ -1,0 +1,59 @@
+#!/bin/bash
+
+if [ $1 == "start" ]; then
+	shift
+	CGROUP=/sys/fs/cgroup
+	CPU_GRP=$CGROUP/cpuset/plumber
+	RDT_GRP=$CGROUP/intel_rdt/plumber
+
+	CPUS=$CPU_GRP/cpuset.cpus
+	MEMS=$CPU_GRP/cpuset.mems
+	CPU_EXC=$CPU_GRP/cpuset.cpu_exclusive
+	MIGRATE=$CPU_GRP/cpuset.memory_migrate
+
+	CACHE=$RDT_GRP/intel_rdt.cache_mask
+	OTHERS_CACHE=$CGROUP/intel_rdt/intel_rdt.cache_mask
+
+	# Create cgroups
+	sudo mkdir $CPU_GRP
+	sudo mkdir $RDT_GRP
+
+	# Setup cgroups
+	echo 1,25    | sudo tee -a $CPUS         > /dev/null
+	echo 0       | sudo tee -a $MEMS         > /dev/null
+	echo 1       | sudo tee -a $CPU_EXC      > /dev/null
+	echo 1       | sudo tee -a $MIGRATE      > /dev/null
+	echo 0x3     | sudo tee -a $CACHE        > /dev/null
+	echo 0xffffc | sudo tee -a $OTHERS_CACHE > /dev/null
+
+	# Setup IRQs
+	for D in /proc/irq/*; do
+	    if [ -d "${D}" ]; then
+	        echo ffff,fdfffffd | sudo tee -a $D/smp_affinity > /dev/null
+	    fi
+	done
+
+	# Start plumber
+	sudo cgexec -g cpuset,intel_rdt:plumber sudo ./Release/plumber $@
+	
+	sleep 1
+	echo "Deamon PID: $(pidof plumber)"
+elif [ $1 == "log" ]; then
+	sudo tail -f /tmp/plumber.log
+elif [ $1 == "pid" ]; then
+	pidof plumber
+elif [ $1 == "kill" ]; then
+	sudo kill $(pidof plumber)
+	
+	for D in /proc/irq/*; do
+	    if [ -d "${D}" ]; then
+	        cat /proc/irq/default_smp_affinity | sudo tee -a $D/smp_affinity > /dev/null
+	        #ffff,ffffffff,ffffffff,ffffffff,ffffffff
+	    fi
+	done
+elif [ $1 == "perf" ]; then
+	cd ~/workspace/linux/tools/perf
+	sudo ./perf top -e LLC-loads-misses -p $(pidof plumber) -d 1 -g -i
+else
+	echo $@ | sudo tee -a $"/tmp/plumber" > /dev/null
+fi

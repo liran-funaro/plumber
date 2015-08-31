@@ -5,8 +5,8 @@
  *      Author: Liran Funaro <fonaro@cs.technion.ac.il>
  */
 
-#ifndef CPUID_CACHE_H_
-#define CPUID_CACHE_H_
+#ifndef PLUMBER_CPUID_CACHE_H_
+#define PLUMBER_CPUID_CACHE_H_
 
 #include <stdio.h>
 #include <stdint.h>
@@ -40,6 +40,8 @@ public:
 	bool is_fully_associative;
 	bool is_self_initializing;
 
+	unsigned int cache_slices;
+
 public:
 	CacheInfo(unsigned int id = 0);
 	void init(unsigned int id);
@@ -63,4 +65,4 @@ public:
 	CacheInfo getCacheLevel(int level);
 };
 
-#endif /* CPUID_CACHE_H_ */
+#endif /* PLUMBER_CPUID_CACHE_H_ */

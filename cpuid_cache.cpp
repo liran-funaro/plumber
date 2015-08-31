@@ -11,17 +11,9 @@ using namespace std;
 
 #define ARRAY_SIZE(arr) (sizeof(arr)/sizeof(*(arr)))
 
-CacheInfo::CacheInfo(unsigned int id) {
-	init(id);
-}
-
-void CacheInfo::init(unsigned int id) {
-	this->id = id;
-
-	uint32_t eax, ebx, ecx, edx;
-
-	eax = 4; // get cache info
-	ecx = id; // cache id
+static inline void cpuid(uint32_t a, uint32_t c, uint32_t& eax, uint32_t& ebx, uint32_t& ecx, uint32_t&edx) {
+	eax = a;
+	ecx = c;
 
 	__asm__ (
 			"cpuid" // call i386 cpuid instruction
@@ -30,7 +22,23 @@ void CacheInfo::init(unsigned int id) {
 			, "+c" (ecx)// contains the cache id
 			, "=d" (edx)
 	);
-	// generates output in 4 registers eax, ebx, ecx and edx
+}
+
+//static inline uint32_t mask_bits(uint32_t reg, unsigned int start, unsigned int end) {
+//	reg >>= start;
+//	reg &= (1<<(end-start+1))-1;
+//	return reg;
+//}
+
+CacheInfo::CacheInfo(unsigned int id) {
+	init(id);
+}
+
+void CacheInfo::init(unsigned int id) {
+	this->id = id;
+
+	uint32_t eax, ebx, ecx, edx;
+	cpuid(4, id, eax, ebx, ecx, edx); // 4: cache-info, id: cache-id
 
 	// taken from http://download.intel.com/products/processor/manual/325462.pdf Vol. 2A 3-149
 	setCacheType(eax & 0x1F);
@@ -52,6 +60,10 @@ void CacheInfo::init(unsigned int id) {
 	// Total cache size is the product
 	total_size = ways_of_associativity * physical_line_partitions
 			* coherency_line_size * sets;
+
+	// TODO: HARD CODED - detect
+	cache_slices = 12;
+
 }
 
 CacheInfo CacheInfo::getCacheLevel(int level) {
@@ -89,19 +101,22 @@ void CacheInfo::setCacheType(int cache_type) {
 
 void CacheInfo::print() const {
 	printf("Cache ID %d:\n"
-			"- Level: %d\n"
-			"- Type: %s\n"
-			"- Sets: %d\n"
-			"- System Coherency Line Size: %d bytes\n"
-			"- Physical Line partitions: %d\n"
-			"- Ways of associativity: %d\n"
-			"- Total Size: %zu bytes (%zu kb)\n"
-			"- Is fully associative: %s\n"
-			"- Is Self Initializing: %s\n", id, level, type_string, sets,
+			" - Level: %d\n"
+			" - Type: %s\n"
+			" - Sets: %d\n"
+			" - System Coherency Line Size: %d bytes\n"
+			" - Physical Line partitions: %d\n"
+			" - Ways of associativity: %d\n"
+			" - Total Size: %zu bytes (%zu kb)\n"
+			" - Is fully associative: %s\n"
+			" - Is Self Initializing: %s\n"
+			" - Number of cache slices: %d\n",
+			id, level, type_string, sets,
 			coherency_line_size, physical_line_partitions,
 			ways_of_associativity, total_size, total_size >> 10,
 			is_fully_associative ? "true" : "false",
-			is_self_initializing ? "true" : "false");
+			is_self_initializing ? "true" : "false",
+			cache_slices);
 }
 
 i386CpuidCaches::i386CpuidCaches() {

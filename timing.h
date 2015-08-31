@@ -5,13 +5,21 @@
  *      Author: Liran Funaro <fonaro@cs.technion.ac.il>
  */
 
-#ifndef TIMING_H_
-#define TIMING_H_
+#ifndef PLUMBER_TIMING_H_
+#define PLUMBER_TIMING_H_
 
 #include <sys/time.h>
-#include "pageallocator.h"
+#include <ctime>
+#include <iostream>
 
-timespec diff(timespec start, timespec end) {
+#include "lineallocator.hpp"
+
+inline void mfence() __attribute__((always_inline));
+inline void mfence() {
+  asm volatile("mfence");
+}
+
+timespec timediff(timespec start, timespec end) {
 	timespec temp;
 	if ((end.tv_nsec - start.tv_nsec) < 0) {
 		temp.tv_sec = end.tv_sec - start.tv_sec - 1;
@@ -41,26 +49,32 @@ timespec norm(timespec input, unsigned int norm) {
 	return res;
 }
 
-template<unsigned int LINE_SIZE>
-void timeTouch(CacheLineAllocator<LINE_SIZE>& x) {
-	timespec ts, te;
-	for (unsigned int i = 0; i < 10; i++) {
-		clock_gettime(CLOCK_REALTIME, &ts);
-		for (unsigned int j = 0; j < 1000; j++) {
-			for (unsigned int way = 0; way < 12; way++) {
-				x.touchWay(way);
-			}
-		}
-		clock_gettime(CLOCK_REALTIME, &te);
-		timespec sumTime = diff(ts, te);
-		timespec totalTime = norm(sumTime, 1000);
-		timespec wayTime = norm(totalTime, 12);
-		cout << dec << "Iteration: " << i << " - Total-Time: "
-				<< totalTime.tv_sec << " sec " << totalTime.tv_nsec << " nsec"
-				<< " - Way-Time: " << wayTime.tv_sec << " sec "
-				<< wayTime.tv_nsec << " nsec" << endl;
-	}
+timespec gettime() {
+	timespec t;
+	clock_gettime(CLOCK_REALTIME, &t);
+	return t;
 }
+
+//template<unsigned int LINE_SIZE>
+//void timeTouch(CacheLineAllocator<LINE_SIZE>& x) {
+//	timespec ts, te;
+//	for (unsigned int i = 0; i < 10; i++) {
+//		clock_gettime(CLOCK_REALTIME, &ts);
+//		for (unsigned int j = 0; j < 1000; j++) {
+//			for (unsigned int way = 0; way < 12; way++) {
+//				x.touchWay(way);
+//			}
+//		}
+//		clock_gettime(CLOCK_REALTIME, &te);
+//		timespec sumTime = diff(ts, te);
+//		timespec totalTime = norm(sumTime, 1000);
+//		timespec wayTime = norm(totalTime, 12);
+//		cout << dec << "Iteration: " << i << " - Total-Time: "
+//				<< totalTime.tv_sec << " sec " << totalTime.tv_nsec << " nsec"
+//				<< " - Way-Time: " << wayTime.tv_sec << " sec "
+//				<< wayTime.tv_nsec << " nsec" << endl;
+//	}
+//}
 
 unsigned long long microsecpassed(struct timeval* t) {
 	struct timeval now, diff;
@@ -165,4 +179,4 @@ static __inline__ unsigned long long rdtsc(void)
 
 #endif
 
-#endif /* TIMING_H_ */
+#endif /* PLUMBER_TIMING_H_ */
