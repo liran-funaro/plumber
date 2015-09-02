@@ -28,20 +28,40 @@
 #include "lineallocator.hpp"
 #include "deamon.h"
 
+#include "timing.h"
+
 #define LLC 3
 using namespace std;
 
 const char * queue_fifo = "/tmp/plumber";
 const char * log_file = "/tmp/plumber.log";
 
-using Allocator = CacheLineAllocator<64>;
-using Line = CacheLine<64>;
+using Allocator = CacheLineAllocator;
+using Line = CacheLine;
 
-class TouchInfo {
+class Busy : exception {};
+
+typedef struct TouchInfo {
+	volatile int touchSet;
+	volatile unsigned int touchLinesPerSet;
+	volatile unsigned long touchIterations;
+	volatile unsigned long eachSetRuns;
+	volatile bool useMemFence;
+	volatile bool disableInterupts;
+	volatile bool flushBefore;
+	volatile bool flushAfter;
+
+	volatile enum {
+		OP_TOUCH, OP_FLUSH, OP_STOP
+	} op;
+} TouchInfo;
+
+class TouchWorker {
 public:
-	int touchSet;
-	unsigned int touchLinesPerSet;
-	int touchIterations;
+	TouchInfo info;
+
+	volatile Line::ptr startLine;
+
 	Allocator& allocator;
 
 	pthread_mutex_t mutex;
@@ -50,53 +70,78 @@ public:
 	volatile static bool touchForever;
 
 public:
-	TouchInfo(Allocator& allocator) : allocator(allocator) {
+	TouchWorker(Allocator& allocator) : allocator(allocator) {
 		mutex = PTHREAD_MUTEX_INITIALIZER;
 		pthread_cond_init(&cv, NULL);
 
-		touchSet = -1;
-		touchLinesPerSet = allocator.getWaysCount();
-		touchIterations = 1;
+		restart();
 	}
 
-	unsigned long getTouchArraySize() {
-		unsigned long touchArraySize = touchLinesPerSet;
-		if(touchSet < 0) {
-			touchArraySize *= allocator.getSetsCount();
+	static TouchInfo defaultInfo() {
+		TouchInfo res;
+		res.op = TouchInfo::OP_TOUCH;
+		res.touchIterations  = 0;		// Forever
+		res.touchSet 		 = -1;		// All sets
+		res.eachSetRuns		 = 1;
+		res.touchLinesPerSet = 1;
+		res.useMemFence 	 = true;
+		res.disableInterupts = false;
+		res.flushBefore 	 = false;
+		res.flushAfter 		 = false;
+		return res;
+	}
+
+	void restart() {
+		info = defaultInfo();
+		startLine = NULL;
+	}
+
+	void sendJob(const TouchInfo& inputInfo) {
+		bool locked = trylock();
+		if(!locked) {
+			throw Busy();
 		}
 
-		return touchArraySize;
-	}
+		info = inputInfo;
+		unsigned long length = 0;
 
-	Line::ptr allocate(Line::arr lines = NULL) {
-		Line::ptr res = NULL;
-		lock();
+		Line::lst lineList;
+
 		try {
-			if(touchSet < 0) {
-				res = allocator.getAllSets(lines, touchLinesPerSet);
+			if(inputInfo.touchSet < 0) {
+				lineList = allocator.getAllSets(info.touchLinesPerSet);
 			} else {
-				res = allocator.getSet(touchSet, lines, touchLinesPerSet);
+				lineList = allocator.getSet(info.touchSet, info.touchLinesPerSet);
 			}
+			startLine = lineList.front();
+			length = lineList.size();
+
+			// Signal only if successful
+			pthread_cond_signal(&cv);
 		} catch(exception& e) {
 			std::cout << "Failed allocation of set(s): " << e.what() << endl;
-			res = NULL;
+			restart();
 		}
-		pthread_cond_signal(&cv);
 		unlock();
 
-		return res;
+		std::cout << "[JOB] Length: " << length << endl;
 	}
 
 	void lock() {
 		pthread_mutex_lock( &mutex );
 	}
 
+	bool trylock() {
+		return pthread_mutex_trylock( &mutex ) == 0;
+	}
+
 	void unlock() {
 		pthread_mutex_unlock( &mutex );
 	}
 
-	void waitForAllocation() {
+	bool waitForJob() {
 		pthread_cond_wait(&cv, &mutex);
+		return true;
 	}
 
 	void startTouchThread() {
@@ -105,40 +150,51 @@ public:
 		int res = pthread_create(&thread_id, NULL, touchWorkerThread, this);
 		if (res) {
 			std::cout << "[ERROR] Failed creating thread: " << res << endl;
-		} else {
-			waitForAllocation();
 		}
 		unlock();
 	}
 
+private:
 	static void* touchWorkerThread(void* p) {
-		TouchInfo* t = reinterpret_cast<TouchInfo*>(p);
-
-		unsigned int touchLinesPerSet = t->touchLinesPerSet;
-		int touchIterations = t->touchIterations;
-
-		Line::ptr line = t->allocate();
-
-		if(line != NULL) {
-			auto start = gettime();
-			if(touchIterations > 0) {
-				line->polluteSets(touchLinesPerSet, touchIterations);
-			} else {
-				line->polluteSets(touchLinesPerSet, TouchInfo::touchForever);
-			}
-			auto end = gettime();
-			auto duration = timediff(start, end);
-
-			double timeMin = (double)duration.tv_sec/60.;
-			std::cout << std::fixed << std::setprecision(2) << dec;
-			std::cout << endl << "Touch duration: " << timeMin << " Minutes (" << duration.tv_sec << " sec. and " << duration.tv_nsec << " nsec.)" << endl;
-		}
-
+		TouchWorker* t = reinterpret_cast<TouchWorker*>(p);
+		t->workerThread();
 		return NULL;
+	}
+
+	void workerThread() {
+		lock();
+		while(waitForJob()) {
+			if(startLine != NULL) {
+				auto start = gettime();
+				switch(info.op) {
+				case TouchInfo::OP_TOUCH:
+					if(info.flushBefore) { startLine->flushSets(); }
+
+					startLine->polluteSets(info.touchLinesPerSet, info.touchIterations, TouchWorker::touchForever,
+							info.eachSetRuns, info.useMemFence, info.disableInterupts);
+
+					if(info.flushAfter) { startLine->flushSets(); }
+					break;
+
+				case TouchInfo::OP_FLUSH:
+					startLine->flushSets();
+					break;
+				default:
+					continue;
+				}
+				auto end = gettime();
+				auto duration = timediff(start, end);
+
+				double timeMin = (double)duration.tv_sec/60.;
+				std::cout << std::fixed << std::setprecision(2) << dec;
+				std::cout << endl << "Touch duration: " << timeMin << " Minutes (" << duration.tv_sec << " sec. and " << duration.tv_nsec << " nsec.)" << endl;
+			}
+		}
+		unlock();
 	}
 };
 
-volatile bool TouchInfo::touchForever = false;
+volatile bool TouchWorker::touchForever = false;
 
 bool cmparg(const char* arg, const char* option1, const char* option2 = NULL) {
 	if (strcmp(arg, option1) == 0) {
@@ -153,7 +209,7 @@ bool cmparg(const char* arg, const char* option1, const char* option2 = NULL) {
 }
 
 int main(int argc, const char* argv[]) {
-	unsigned long linesPerSet = 16;
+	unsigned long linesPerSet = 0;  // According to actual ways in the CPU
 	unsigned int availableWays = 2;
 	bool doBenchmark = false;
 	bool fake = false;
@@ -194,7 +250,7 @@ int main(int argc, const char* argv[]) {
 		if(!fake) {
 			a.allocateAllSets();
 		} else{
-			a.allocateSet(0, linesPerSet);
+			a.allocateSet(0, a.getLinesPerSet());
 		}
 		auto end = gettime();
 
@@ -212,6 +268,8 @@ int main(int argc, const char* argv[]) {
 		// Message Loop
 		////////////////////////////////////////////////////////////////////////
 		Messages msg(queue_fifo);
+		TouchWorker touch(a);
+		touch.startTouchThread();
 
 		while(msg.readQueue()) {
 			try {
@@ -221,9 +279,8 @@ int main(int argc, const char* argv[]) {
 				if(op == "q" || op == "quit") {
 					return 0;
 				} else if(op == "t" || op == "touch") {
-					TouchInfo t(a);
+					auto t = touch.defaultInfo();
 
-					bool stopOperation = false;
 					while(msg.haveTokens()) {
 						string touchOp = msg.popStringToken();
 						if(touchOp == "set" || touchOp == "s") {
@@ -232,19 +289,31 @@ int main(int argc, const char* argv[]) {
 							t.touchLinesPerSet = msg.popNumberToken();
 						} else if(touchOp == "iterations" || touchOp == "i") {
 							t.touchIterations = msg.popNumberToken();
+						} else if(touchOp == "no-fence") {
+							t.useMemFence = false;
+						} else if(touchOp == "disable-interrupts") {
+							t.disableInterupts = true;
+						} else if(touchOp == "set-i") {
+							t.eachSetRuns = msg.popNumberToken();
 						} else if(touchOp == "forever" || touchOp == "f") {
-							t.touchIterations = -1;
-							TouchInfo::touchForever = true;
+							t.touchIterations = 0;
 						} else if(touchOp == "stop") {
-							TouchInfo::touchForever = false;
-							stopOperation = true;
+							t.op = TouchInfo::OP_STOP;
+						} else if(touchOp == "flush") {
+							t.op = TouchInfo::OP_FLUSH;
+						} else if(touchOp == "flush-before") {
+							t.flushBefore = true;
+						} else if(touchOp == "flush-after") {
+							t.flushAfter = true;
 						} else {
 							throw UnknownOperation(op + " " + touchOp);
 						}
 					}
 
-					if(!stopOperation) {
-						t.startTouchThread();
+					if(t.op == TouchInfo::OP_TOUCH || t.op == TouchInfo::OP_FLUSH) {
+						touch.sendJob(t);
+					} else if(t.op == TouchInfo::OP_STOP) {
+						TouchWorker::touchForever = false;
 					}
 				} else {
 					throw UnknownOperation(op);
@@ -253,6 +322,8 @@ int main(int argc, const char* argv[]) {
 				std::cout << "[MSG ERROR] Out of tokens" << endl;
 			} catch (UnknownOperation& e) {
 				std::cout << "[MSG ERROR] " << e.what() << ": " << e.op() << endl;
+			} catch (Busy& e) {
+				std::cout << "[BUSY] Already running a touch work" << endl;
 			}
 		}
 	} catch (exception& e) {

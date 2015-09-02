@@ -21,22 +21,24 @@
 using namespace std;
 
 class LineAllocatorException: public exception {
-	const char* _what;
+	const string _what;
 public:
 	LineAllocatorException(const char* what) : _what(what) {}
-	virtual const char* what() const throw (){return _what;}
+	LineAllocatorException(const string& what) : _what(what) {}
+	LineAllocatorException(const stringstream& what) : _what(what.str()) {}
+	virtual const char* what() const throw (){return _what.c_str();}
 };
 
-template <unsigned int LINE_SIZE>
 class CacheLineAllocator {
 public:
-	using CacheSets = map<unsigned int, CacheLine<64>::uset>;
+	using CacheSets = map<unsigned int, CacheLine::uset>;
 
 private:
 	const int cacheLevel;
 
 	CacheInfo cacheInfo;
 
+	unsigned int lineSize;
 	unsigned int ways;
 	unsigned int sets;
 	unsigned int setsPerSlice;
@@ -45,22 +47,24 @@ private:
 	unsigned long availableWays;
 
 	bool verbose;
+	bool printAllocationInformation;
 
 	CacheSets linesSets;
 
+	char lastFilename[512];
+
 public:
-	CacheLineAllocator(int cacheLevel, unsigned int linesPerSet = 0,
-			unsigned long availableWays = 2, bool verbose = false) : cacheLevel(cacheLevel), linesPerSet(linesPerSet),
+	CacheLineAllocator(int cacheLevel, unsigned int inputLinesPerSet = 0,
+			unsigned long availableWays = 2, bool verbose = false) : cacheLevel(cacheLevel), linesPerSet(inputLinesPerSet),
 			availableWays(availableWays), verbose(verbose) {
 		cacheInfo = CacheInfo::getCacheLevel(cacheLevel);
 		if(verbose) {
 			cacheInfo.print();
 		}
 
-		if (cacheInfo.coherency_line_size != LINE_SIZE) {
-			throw LineAllocatorException("Cache line size must be LINE_SIZE bytes");
-		}
+		printAllocationInformation = true;
 
+		lineSize = cacheInfo.coherency_line_size;
 		ways = cacheInfo.ways_of_associativity;
 		sets = cacheInfo.sets;
 		setsPerSlice = sets / cacheInfo.cache_slices;
@@ -70,22 +74,39 @@ public:
 		}
 
 		lastFilename[0] = 0;
+
+		CacheLine::allocatePoll(lineSize);
 	}
 
 	~CacheLineAllocator() {
 		clean(0);
 	}
 
+public:
+	unsigned int getLinesPerSet() const {
+		return linesPerSet;
+	}
+
 private:
-	CacheLine<LINE_SIZE>* newLine() const {
-		return new CacheLine<LINE_SIZE>(setsPerSlice);
+	CacheLine::ptr newLine() const {
+		return new CacheLine(lineSize, setsPerSlice);
 	}
 
 	void allocateLine() {
 		putLine(newLine());
 	}
 
-	void putLine(typename CacheLine<LINE_SIZE>::ptr line) {
+	void discardLine(CacheLine::ptr line) {
+		auto curSet = line->getInSliceSet();
+		linesSets[curSet].erase(line);
+
+		curSet = line->getSet();
+		linesSets[curSet].erase(line);
+
+		delete line;
+	}
+
+	void putLine(CacheLine::ptr line) {
 		unsigned long lineSet = line->getSet();
 		linesSets[lineSet].insert(line);
 	}
@@ -107,7 +128,7 @@ private:
 	unsigned long getLinesSizeSum() {
 		unsigned long linesSizeSum = 0;
 		for (unsigned long i = 0; i < sets; i++) {
-			linesSizeSum += linesSets[i].size() * LINE_SIZE;
+			linesSizeSum += linesSets[i].size() * lineSize;
 		}
 
 		return linesSizeSum;
@@ -124,7 +145,7 @@ private:
 		for (auto setIt = linesSets.begin(); setIt != linesSets.end(); setIt++) {
 			while (setIt->second.size() > maxElementsInGroup) {
 				auto lineIt = setIt->second.begin();
-				CacheLine<LINE_SIZE>* line = *lineIt;
+				CacheLine::ptr line = *lineIt;
 				setIt->second.erase(lineIt);
 				delete line;
 			}
@@ -140,69 +161,78 @@ public:
 		return ways;
 	}
 
-	const typename CacheLine<LINE_SIZE>::uset& allocateSet(unsigned long set, unsigned long count) {
+	const CacheLine::uset& allocateSet(unsigned long set, unsigned long count) {
 		while(linesSets[set].size() < count) {
 			allocateLine();
 		}
 
-		CacheLine<LINE_SIZE>::GC();
+		CacheLine::GC();
 
 		return getSet(set);
 	}
 
-	const typename CacheLine<LINE_SIZE>::uset& getSet(unsigned long set) {
+	const CacheLine::uset& getSet(unsigned long set) {
 		return linesSets[set];
 	}
 
-	typename CacheLine<LINE_SIZE>::ptr getSet(int set, typename CacheLine<LINE_SIZE>::arr setLines, unsigned int count) {
+	CacheLine::lst getSet(int set, unsigned int count) {
 		auto curSet = getSet(set);
-		unsigned int pos = 0;
-		typename CacheLine<LINE_SIZE>::ptr res = NULL;
-		typename CacheLine<LINE_SIZE>::ptr curline = NULL;
+		CacheLine::lst ret;
 
-		for (auto l = curSet.begin(); l != curSet.end() && pos < count; l++){
-			if(setLines != NULL) {
-				setLines[pos] = *l;
-			}
-
-			if(res == NULL) {
-				res = *l;
-				curline = *l;
-			} else {
-				curline->setNext(*l);
-				curline = *l;
-			}
-
-			pos += 1;
+		for (auto l = curSet.begin(); l != curSet.end() && ret.size() < count; l++) {
+			ret.insertBack(*l);
 		}
 
-		curline->setNext(NULL);
-
-		if (pos < count) {
+		if (ret.size() < count) {
 			throw LineAllocatorException("Not enough lines in set");
 		}
 
-		return res;
-	}
-
-	typename CacheLine<LINE_SIZE>::ptr getAllSets(typename CacheLine<LINE_SIZE>::arr setLines, unsigned int countPerSet) {
-		typename CacheLine<LINE_SIZE>::ptr res = NULL;
-		typename CacheLine<LINE_SIZE>::ptr curline = NULL;
-
-		for(unsigned int set=0; set < getSetsCount(); set++) {
-			typename CacheLine<LINE_SIZE>::arr setLinesPos = setLines != NULL ? setLines + (countPerSet*set) : NULL;
-
-			auto cursetline = getSet(set, setLinesPos, countPerSet);
-			if(res == NULL) {
-				res = cursetline;
-				curline = cursetline;
-			} else {
-				curline->setNext(cursetline);
-				curline = cursetline;
-			}
+		auto length = validateUniqueLineList(ret.front());
+		if(length != ret.size()) {
+			throw LineAllocatorException("Actual list length does not match (per set)");
 		}
 
-		return res;
+		return ret;
+	}
+
+	CacheLine::lst getAllSets(unsigned int countPerSet) {
+		CacheLine::lst ret;
+
+		for(unsigned int set=0; set < getSetsCount(); set++) {
+			auto setList = getSet(set, countPerSet);
+			ret.insertBack(setList);
+		}
+
+		auto length = validateUniqueLineList(ret.front());
+		if(length != ret.size()) {
+			throw LineAllocatorException("Actual list length does not match (all sets)");
+		}
+
+		return ret;
+	}
+
+	unsigned long validateUniqueLineList(CacheLine::ptr lineList) {
+		CacheLine::ptr curline = lineList;
+
+		CacheLine::uset lineSet;
+		unsigned long count = 0;
+
+
+		while (curline != NULL) {
+			lineSet.insert(curline);
+			count += 1;
+			curline = curline->next;
+		}
+
+		if(count != lineSet.size()) {
+			stringstream ss;
+			ss << "Repeating items in list. List length: " << count << " but " << lineSet.size() << " unique items";
+			throw LineAllocatorException(ss);
+		}
+
+		curline->validateAll();
+
+		return count;
 	}
 
 	void rePartitionSets() {
@@ -210,21 +240,26 @@ public:
 		linesSets.clear();
 		for(auto setIt=oldMap.begin(); setIt != oldMap.end(); setIt++) {
 			for(auto lineIt=setIt->second.begin(); lineIt != setIt->second.end(); lineIt++) {
-				putLine(*lineIt);
+				if((*lineIt)->getCacheSlice() < 0) {
+					discardLine(*lineIt);
+				} else {
+					putLine(*lineIt);
+				}
 			}
 		}
 	}
 
 	void allocateAllSets() {
 		for(unsigned int curSet=0; curSet < setsPerSlice; ++curSet) {
-			std::cout << "[SET: " << setfill(' ') << setw(3) << dec << curSet << "] " << std::flush;
+			if(verbose || printAllocationInformation) {
+				std::cout << "[SET: " << setfill(' ') << setw(5) << dec << curSet << "] " << std::flush;
+			}
 
 			auto& setLines = getSet(curSet);
 			auto detector = CacheSliceDetector(setLines, cacheInfo.cache_slices, availableWays, linesPerSet, verbose);
 
 			bool moreWork = true;
 			bool moreLines = setLines.size() < linesPerSet;
-			bool reset = false;
 			bool doubleRuns = false;
 
 			unsigned int allocationRetries = 0;
@@ -233,26 +268,20 @@ public:
 			while(moreWork) {
 				if(moreLines) {
 					if(verbose) {std::cout << "[ALLOCATION] Set: " << curSet << " " << std::flush;}
-					else {std::cout << "Allocating, " << std::flush;}
+					else if(printAllocationInformation) {std::cout << "Allocating, " << std::flush;}
 
 					allocateSet(curSet, setLines.size() + linesPerSet);
 					allocationRetries += 1;
 
 					if(verbose) {
-						std::cout << "[SUCCESS] Total: " << setLines.size() << " lines ("<< ((double)CacheLine<LINE_SIZE>::getTotalAllocatedPoll() / (double)(1<<30)) << " GB)" << endl;
+						std::cout << "[SUCCESS] Total: " << setLines.size() << " lines ("<< ((double)CacheLine::getTotalAllocatedPoll() / (double)(1<<30)) << " GB)" << endl;
 					}
 
 					moreLines = false;
 				}
-				if(reset) {
-					if(verbose) {std::cout << "[RESET]" << endl;}
-					else {std::cout << "Reset, " << std::flush;}
-					detector.reset();
-					reset = false;
-				}
 				if(doubleRuns) {
 					if(verbose) {std::cout << "[DOUBLE RUNS]" << endl;}
-					else {std::cout << "Double-runs, " << std::flush;}
+					else if(printAllocationInformation) {std::cout << "Double-runs, " << std::flush;}
 					detector.doubleRuns();
 					doubleRuns = false;
 				}
@@ -283,52 +312,41 @@ public:
 							throw LineAllocatorException("Address changed");
 						}
 
-						reset = true;
 						doubleRuns = true;
 						allocationRetries = 0;
 					}
 				} catch (CacheSliceResetException& e) {
 					if(verbose) {
-						std::cout << endl << "[ERROR] Set: " << dec << curSet << " - " << e.what() << " => " << std::flush;
+						std::cout.imbue(std::locale());
+						std::cout << endl << "[ERROR] Set: " << dec << curSet << " - " << e.what()
+								<< " -- for address: 0x" << hex << ((CacheLine::ptr)e.line())->getPhysicalAddr() << " => " << std::flush;
 					}
 					moreWork = true;
 					moreLines = false;
-					reset = true;
 					doubleRuns = true;
 
-					CacheLine<64>* line = const_cast<CacheLine<64>*>((CacheLine<64>*)e.line());
-					linesSets[curSet].erase(line);
-					delete line;
+					discardLine((CacheLine*)e.line());
 				} catch (CacheLineException& e) {
 					if(verbose) {
 						std::cout << endl << "[ERROR] Set: " << dec << curSet << " - " << e.what() << " => " << std::flush;
-					} else {
+					} else if(printAllocationInformation) {
 						std::cout << e.what() << ", " << std::flush;
 					}
 					moreWork = true;
 					moreLines = false;
-					reset = true;
 					doubleRuns = true;
 				}
 			}
 
-			std::cout << "[SUCCESS SET: " << setfill(' ') << setw(3) << dec << curSet << "] " << endl;
+			if(verbose || printAllocationInformation) {
+				std::cout << "[SUCCESS SET: " << setfill(' ') << setw(5) << dec << curSet << "] " << endl;
+			}
 		}
 
 		rePartitionSets();
 		write();
-	}
 
-	void detectNewSets(unsigned long curSet) {
-		auto& setLines = getSet(curSet);
-		auto detector = CacheSliceDetector(setLines, cacheInfo.cache_slices, availableWays);
-		detector.findAllLinesOnExistingSets();
-	}
-
-	void detectNewSets() {
-		for(unsigned int curSet=0; curSet < setsPerSlice; ++curSet) {
-			detectNewSets(curSet);
-		}
+		SetTester::clearArrays();
 	}
 
 	void print() const {
@@ -343,35 +361,7 @@ public:
 		cout << endl;
 	}
 
-	char lastFilename[512];
-
-	void write() {
-		char filename[512];
-		sprintf(filename, "../result/lineallocator-%llu.txt", rdtsc());
-		ofstream outputfile;
-		outputfile.open(filename);
-		outputfile << "#SET;SLICE;ADDR" << endl;
-
-		for(auto s = linesSets.begin(); s != linesSets.end(); s++) {
-			auto& curSliceSet = s->second;
-
-			for(auto i=curSliceSet.begin(); i != curSliceSet.end(); ++i) {
-				outputfile << std::hex
-						<< (*i)->getSet() << ";"
-						<< (*i)->getCacheSlice() << ";"
-						<< (*i)->getPhysicalAddr() << endl;
-			}
-		}
-
-		outputfile.close();
-		std::cout << "[SAVE] Saved to file" << filename << endl;
-
-		if(lastFilename[0] != 0) {
-			remove(lastFilename);
-		}
-
-		strcpy(lastFilename, filename);
-	}
+	void write();
 };
 
 #endif /* PLUMBER_LINEALLOCATOR_HPP_ */

@@ -1,59 +1,78 @@
 #!/bin/bash
 
+CGROUP=/sys/fs/cgroup
+CPU_GRP=$CGROUP/cpuset/plumber
+RDT_GRP=$CGROUP/intel_rdt/plumber
+
+CPUS=$CPU_GRP/cpuset.cpus
+MEMS=$CPU_GRP/cpuset.mems
+CPU_EXC=$CPU_GRP/cpuset.cpu_exclusive
+MIGRATE=$CPU_GRP/cpuset.memory_migrate
+
+CACHE=$RDT_GRP/intel_rdt.cache_mask
+OTHERS_CACHE=$CGROUP/intel_rdt/intel_rdt.cache_mask
+
 if [ $1 == "start" ]; then
 	shift
-	CGROUP=/sys/fs/cgroup
-	CPU_GRP=$CGROUP/cpuset/plumber
-	RDT_GRP=$CGROUP/intel_rdt/plumber
-
-	CPUS=$CPU_GRP/cpuset.cpus
-	MEMS=$CPU_GRP/cpuset.mems
-	CPU_EXC=$CPU_GRP/cpuset.cpu_exclusive
-	MIGRATE=$CPU_GRP/cpuset.memory_migrate
-
-	CACHE=$RDT_GRP/intel_rdt.cache_mask
-	OTHERS_CACHE=$CGROUP/intel_rdt/intel_rdt.cache_mask
 
 	# Create cgroups
-	sudo mkdir $CPU_GRP
-	sudo mkdir $RDT_GRP
+	sudo mkdir -p $CPU_GRP
+	sudo mkdir -p $RDT_GRP
 
 	# Setup cgroups
-	echo 1,25    | sudo tee -a $CPUS         > /dev/null
+	echo 11,35   | sudo tee -a $CPUS         > /dev/null
 	echo 0       | sudo tee -a $MEMS         > /dev/null
-	echo 1       | sudo tee -a $CPU_EXC      > /dev/null
 	echo 1       | sudo tee -a $MIGRATE      > /dev/null
 	echo 0x3     | sudo tee -a $CACHE        > /dev/null
-	echo 0xffffc | sudo tee -a $OTHERS_CACHE > /dev/null
-
-	# Setup IRQs
-	for D in /proc/irq/*; do
-	    if [ -d "${D}" ]; then
-	        echo ffff,fdfffffd | sudo tee -a $D/smp_affinity > /dev/null
-	    fi
-	done
 
 	# Start plumber
 	sudo cgexec -g cpuset,intel_rdt:plumber sudo ./Release/plumber $@
 	
 	sleep 1
 	echo "Deamon PID: $(pidof plumber)"
+elif [ $1 == "cache" ]; then
+	shift
+	echo $1     | sudo tee -a $CACHE        > /dev/null
 elif [ $1 == "log" ]; then
 	sudo tail -f /tmp/plumber.log
 elif [ $1 == "pid" ]; then
-	pidof plumber
+	pids=$(pidof plumber)
+	echo "$(pidof plumber | tr ' ' ,) (${#pids[@]})"
 elif [ $1 == "kill" ]; then
-	sudo kill $(pidof plumber)
-	
-	for D in /proc/irq/*; do
-	    if [ -d "${D}" ]; then
-	        cat /proc/irq/default_smp_affinity | sudo tee -a $D/smp_affinity > /dev/null
-	        #ffff,ffffffff,ffffffff,ffffffff,ffffffff
-	    fi
-	done
-elif [ $1 == "perf" ]; then
+	echo q | sudo tee -a $"/tmp/plumber" & > /dev/null
+	sleep 1
+	sudo kill -9 $(pidof plumber)
+	pids=$(pidof plumber)
+	echo "PIDs count: ${#pids[@]}"
+elif [ $1 == "perf-touch" ]; then
+	shift
+	timeSec=$1
+	shift
+	echo "touch $@" | sudo tee -a $"/tmp/plumber" > /dev/null
+
 	cd ~/workspace/linux/tools/perf
-	sudo ./perf top -e LLC-loads-misses -p $(pidof plumber) -d 1 -g -i
+
+	sleep 1
+	sudo ./perf stat \
+		-e LLC-loads-misses:u,LLC-loads:u \
+		-e L1-dcache-loads:u,L1-dcache-load-misses:u \
+		-p $(pidof plumber | tr ' ' ,) \
+		-c sleep ${timeSec}
+ 
+	echo "touch stop" | sudo tee -a $"/tmp/plumber" > /dev/null
+elif [ $1 == "perf" ]; then
+	shift
+	timeSec=$1
+	shift
+
+	cd ~/workspace/linux/tools/perf
+
+	sleep 1
+	sudo ./perf stat \
+		-e LLC-loads-misses:u,LLC-loads:u \
+		-e L1-dcache-loads:u,L1-dcache-load-misses:u \
+		-p $(pidof plumber | tr ' ' ,) \
+		-c sleep ${timeSec}
 else
 	echo $@ | sudo tee -a $"/tmp/plumber" > /dev/null
 fi

@@ -19,69 +19,22 @@ inline void mfence() {
   asm volatile("mfence");
 }
 
-timespec timediff(timespec start, timespec end) {
-	timespec temp;
-	if ((end.tv_nsec - start.tv_nsec) < 0) {
-		temp.tv_sec = end.tv_sec - start.tv_sec - 1;
-		temp.tv_nsec = 1000000000 + end.tv_nsec - start.tv_nsec;
-	} else {
-		temp.tv_sec = end.tv_sec - start.tv_sec;
-		temp.tv_nsec = end.tv_nsec - start.tv_nsec;
-	}
-	return temp;
-}
+timespec timediff(timespec start, timespec end);
+timespec norm(timespec input, unsigned int norm) ;
 
-timespec norm(timespec input, unsigned int norm) {
-	timespec res;
-	res.tv_sec = 0;
-	while (input.tv_sec > norm) {
-		res.tv_sec += 1;
-		input.tv_sec -= norm;
-	}
-
-	res.tv_nsec = (input.tv_nsec + (input.tv_sec * 1000000000)) / norm;
-
-	while (res.tv_nsec > 1000000000) {
-		res.tv_sec += 1;
-		res.tv_nsec -= 1000000000;
-	}
-
-	return res;
-}
-
-timespec gettime() {
+inline timespec gettime() {
 	timespec t;
 	clock_gettime(CLOCK_REALTIME, &t);
 	return t;
 }
 
-//template<unsigned int LINE_SIZE>
-//void timeTouch(CacheLineAllocator<LINE_SIZE>& x) {
-//	timespec ts, te;
-//	for (unsigned int i = 0; i < 10; i++) {
-//		clock_gettime(CLOCK_REALTIME, &ts);
-//		for (unsigned int j = 0; j < 1000; j++) {
-//			for (unsigned int way = 0; way < 12; way++) {
-//				x.touchWay(way);
-//			}
-//		}
-//		clock_gettime(CLOCK_REALTIME, &te);
-//		timespec sumTime = diff(ts, te);
-//		timespec totalTime = norm(sumTime, 1000);
-//		timespec wayTime = norm(totalTime, 12);
-//		cout << dec << "Iteration: " << i << " - Total-Time: "
-//				<< totalTime.tv_sec << " sec " << totalTime.tv_nsec << " nsec"
-//				<< " - Way-Time: " << wayTime.tv_sec << " sec "
-//				<< wayTime.tv_nsec << " nsec" << endl;
-//	}
-//}
-
-unsigned long long microsecpassed(struct timeval* t) {
+inline unsigned long long microsecpassed(struct timeval* t) {
 	struct timeval now, diff;
 	gettimeofday(&now, NULL);
 	timersub(&now, t, &diff);
 	return (diff.tv_sec * 1000 * 1000)  + diff.tv_usec;
 }
+
 
 #if defined(__i386__)
 
