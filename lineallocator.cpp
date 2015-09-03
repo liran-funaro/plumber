@@ -10,7 +10,7 @@
 
 void CacheLineAllocator::write() {
 		char filename[512];
-		sprintf(filename, "../result/lineallocator-%llu.txt", rdtsc());
+		sprintf(filename, "/home/fonaro/workspace/result/lineallocator-%llu.txt", rdtsc());
 		ofstream outputfile;
 		outputfile.open(filename);
 		outputfile << "#SET;SLICE;ADDR" << endl;

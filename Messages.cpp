@@ -5,8 +5,6 @@
  *      Author: liran
  */
 
-#include "Messages.h"
-
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -21,6 +19,8 @@
 
 #include <sys/types.h>
 #include <unistd.h>
+
+#include "Messages.h"
 
 using namespace std;
 

@@ -208,33 +208,37 @@ bool cmparg(const char* arg, const char* option1, const char* option2 = NULL) {
 	return false;
 }
 
-int main(int argc, const char* argv[]) {
-	unsigned long linesPerSet = 0;  // According to actual ways in the CPU
-	unsigned int availableWays = 2;
-	bool doBenchmark = false;
-	bool fake = false;
-	bool deamonize = false;
-	bool verbose = false;
-
+unsigned long getNumberArgument(int argc, const char* argv[], unsigned long defaultValue,
+		const char* option1, const char* option2 = NULL) {
 	for(int i = 1; i < argc; i++) {
-		if (cmparg(argv[i], "--lines-per-set", "-l")) {
-			i++;
-			if(i >= argc) break;
-			istringstream ( argv[i] ) >> linesPerSet;
-		} else if (cmparg(argv[i], "--ways", "-w")) {
-			i++;
-			if(i >= argc) break;
-			istringstream ( argv[i] ) >> availableWays;
-		} else if(cmparg(argv[i], "--benchmark")) {
-			doBenchmark = true;
-		} else if(cmparg(argv[i], "--fake", "-f")) {
-			fake = true;
-		} else if(cmparg(argv[i], "--deamon", "-d")) {
-			deamonize = true;
-		} else if(cmparg(argv[i], "--verbose", "-v")) {
-			verbose = true;
+		if (cmparg(argv[i], option1, option2)) {
+			if(++i >= argc) break;
+			istringstream ( argv[i] ) >> defaultValue;
+		}
+		break;
+	}
+
+	return defaultValue;
+}
+
+bool getBoolArgument(int argc, const char* argv[],
+		const char* option1, const char* option2 = NULL) {
+	for(int i = 1; i < argc; i++) {
+		if (cmparg(argv[i], option1, option2)) {
+			return true;
 		}
 	}
+
+	return false;
+}
+
+int main(int argc, const char* argv[]) {
+	auto linesPerSet   = getNumberArgument(argc, argv, 0, "--lines-per-set", "-l");  // According to actual ways in the CPU
+	auto availableWays = getNumberArgument(argc, argv, 2, "--ways",          "-w");
+	auto deamonize     = getBoolArgument  (argc, argv,    "--deamon",        "-d");
+	auto verbose       = getBoolArgument  (argc, argv,    "--verbose",       "-v");
+	auto doBenchmark   = getBoolArgument  (argc, argv,    "--benchmark");
+	auto fake 		   = getBoolArgument  (argc, argv,    "--fake");
 
 	if(deamonize) {
 		daemonize("plumber", NULL, log_file);
@@ -332,7 +336,6 @@ int main(int argc, const char* argv[]) {
 	}
 
 	if(deamonize) {
-		unlink(queue_fifo);
 		finilize_deamon();
 	}
 
