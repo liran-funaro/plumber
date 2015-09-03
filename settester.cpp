@@ -9,9 +9,7 @@
 #include "settester.hpp"
 #include "ObjectPoll.h"
 
-CacheLine::arr SetTester::testLinesArrays[TEST_LINES_ARRAYS] = {NULL};
-
-CacheLine::arr SetTester::getRandomArray(unsigned int maxTestLinesCount) {
+CacheLine::arr SetTester::getRandomArray() {
 	auto i = rand() % TEST_LINES_ARRAYS;
 	if(testLinesArrays[i] == NULL) {
 		testLinesArrays[i] = new CacheLine::ptr[maxTestLinesCount];
@@ -68,22 +66,20 @@ inline int time_lines(CacheLine::arr lines, unsigned long numbersOfWays,
 
 	clearLines(lines, numbersOfWays);
 
-	const unsigned int last = numbersOfWays - 1;
-
 	iopl(3);
 	__asm__ __volatile__("cli");
 	for (unsigned long run = 0; run < runs; run++) {
 		// Ensure the first address is cached by accessing it.
-		g_dummy[loc] += *(volatile int *) lines[last];
+		g_dummy[loc] += *(volatile int *) lines[0];
 		mfence();
 		// Now pull the other addresses through the cache too.
-		for (unsigned int i = 0; i < last; i++) {
+		for (unsigned int i = 1; i < numbersOfWays; i++) {
 			g_dummy[loc] += *(volatile int *) lines[i];
 		}
 		mfence();
 		// See whether the first address got evicted from the cache by
 		// timing accessing it.
-		times[run] = time_access(lines[last], loc);
+		times[run] = time_access(lines[0], loc);
 	}
 	__asm__ __volatile__("sti");
 	// Find the median time.  We use the median in order to discard

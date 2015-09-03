@@ -46,7 +46,6 @@ typedef struct TouchInfo {
 	volatile unsigned int touchLinesPerSet;
 	volatile unsigned long touchIterations;
 	volatile unsigned long eachSetRuns;
-	volatile bool useMemFence;
 	volatile bool disableInterupts;
 	volatile bool flushBefore;
 	volatile bool flushAfter;
@@ -84,7 +83,6 @@ public:
 		res.touchSet 		 = -1;		// All sets
 		res.eachSetRuns		 = 1;
 		res.touchLinesPerSet = 1;
-		res.useMemFence 	 = true;
 		res.disableInterupts = false;
 		res.flushBefore 	 = false;
 		res.flushAfter 		 = false;
@@ -171,7 +169,7 @@ private:
 					if(info.flushBefore) { startLine->flushSets(); }
 
 					startLine->polluteSets(info.touchLinesPerSet, info.touchIterations, TouchWorker::touchForever,
-							info.eachSetRuns, info.useMemFence, info.disableInterupts);
+							info.eachSetRuns, info.disableInterupts);
 
 					if(info.flushAfter) { startLine->flushSets(); }
 					break;
@@ -293,8 +291,6 @@ int main(int argc, const char* argv[]) {
 							t.touchLinesPerSet = msg.popNumberToken();
 						} else if(touchOp == "iterations" || touchOp == "i") {
 							t.touchIterations = msg.popNumberToken();
-						} else if(touchOp == "no-fence") {
-							t.useMemFence = false;
 						} else if(touchOp == "disable-interrupts") {
 							t.disableInterupts = true;
 						} else if(touchOp == "set-i") {

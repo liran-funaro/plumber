@@ -92,7 +92,7 @@ void CacheLine::flushSets() {
 }
 
 void CacheLine::polluteSets(unsigned int setSize, unsigned long runs, volatile bool& continueFlag,
-		unsigned long eachSetRuns, bool useMemFence, bool disableInterupts) {
+		unsigned long eachSetRuns, bool disableInterupts) {
 	continueFlag = true;
 
 	if(disableInterupts) {
@@ -115,10 +115,6 @@ void CacheLine::polluteSets(unsigned int setSize, unsigned long runs, volatile b
 
 			setLinesCount = (setLinesCount + 1) % setSize;
 			if(setLinesCount == 0) {
-				if(useMemFence) {
-					asm volatile("mfence");
-				}
-
 				setLinesRuns -= 1;
 				if(setLinesRuns == 0) {
 					setline = curline;
@@ -131,10 +127,6 @@ void CacheLine::polluteSets(unsigned int setSize, unsigned long runs, volatile b
 
 		if(disableInterupts) {
 			__asm__ __volatile__("sti");
-		}
-
-		if(useMemFence) {
-			asm volatile("mfence");
 		}
 	}
 }

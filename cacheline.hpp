@@ -175,7 +175,7 @@ public:
 	void flushSets();
 
 	void polluteSets(unsigned int setSize, unsigned long runs, volatile bool& continueFlag,
-			unsigned long eachSetRuns = 1, bool useMemFence = true, bool disableInterupts = false);
+			unsigned long eachSetRuns = 1, bool disableInterupts = false);
 
 	/*********************************************************************************************
 	 * Poll Control

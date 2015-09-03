@@ -50,13 +50,14 @@ private:
 	bool printAllocationInformation;
 
 	CacheSets linesSets;
+	CacheSliceDetector detector;
 
 	char lastFilename[512];
 
 public:
 	CacheLineAllocator(int cacheLevel, unsigned int inputLinesPerSet = 0,
 			unsigned long availableWays = 2, bool verbose = false) : cacheLevel(cacheLevel), linesPerSet(inputLinesPerSet),
-			availableWays(availableWays), verbose(verbose) {
+			availableWays(availableWays), verbose(verbose), detector(verbose) {
 		cacheInfo = CacheInfo::getCacheLevel(cacheLevel);
 		if(verbose) {
 			cacheInfo.print();
@@ -250,13 +251,12 @@ public:
 	}
 
 	void allocateAllSets() {
-		for(unsigned int curSet=0; curSet < setsPerSlice; ++curSet) {
-			if(verbose || printAllocationInformation) {
-				std::cout << "[SET: " << setfill(' ') << setw(5) << dec << curSet << "] " << std::flush;
-			}
+		detector.init(cacheInfo.cache_slices, availableWays, linesPerSet);
 
+		for(unsigned int curSet=0; curSet < setsPerSlice; ++curSet) {
+			VERBOSE("[SET: " << setfill(' ') << setw(5) << dec << curSet << "] ");
+			detector.restartRuns();
 			auto& setLines = getSet(curSet);
-			auto detector = CacheSliceDetector(setLines, cacheInfo.cache_slices, availableWays, linesPerSet, verbose);
 
 			bool moreWork = true;
 			bool moreLines = setLines.size() < linesPerSet;
@@ -267,32 +267,26 @@ public:
 
 			while(moreWork) {
 				if(moreLines) {
-					if(verbose) {std::cout << "[ALLOCATION] Set: " << curSet << " " << std::flush;}
+					VERBOSE("[ALLOCATION] Set: " << curSet << " ")
 					else if(printAllocationInformation) {std::cout << "Allocating, " << std::flush;}
 
 					allocateSet(curSet, setLines.size() + linesPerSet);
 					allocationRetries += 1;
-
-					if(verbose) {
-						std::cout << "[SUCCESS] Total: " << setLines.size() << " lines ("<< ((double)CacheLine::getTotalAllocatedPoll() / (double)(1<<30)) << " GB)" << endl;
-					}
-
 					moreLines = false;
+					VERBOSE("[SUCCESS] Total: " << setLines.size() << " lines ("<< ((double)CacheLine::getTotalAllocatedPoll() / (double)(1<<30)) << " GB)" << endl);
 				}
 				if(doubleRuns) {
-					if(verbose) {std::cout << "[DOUBLE RUNS]" << endl;}
+					VERBOSE("[DOUBLE RUNS]" << endl)
 					else if(printAllocationInformation) {std::cout << "Double-runs, " << std::flush;}
 					detector.doubleRuns();
 					doubleRuns = false;
 				}
 
 				try {
-					detector.detectAllCacheSlices();
+					detector.detectAllCacheSlices(setLines);
 					moreWork = false;
 				} catch (NeedMoreLinesException& e) {
-					if(verbose) {
-						std::cout << endl << "[ERROR] Set: " << dec <<curSet << " - " << e.what() << " => " << std::flush;
-					}
+					VERBOSE("[ERROR] Set: " << dec <<curSet << " - " << e.what() << " => ");
 					moreWork = true;
 					moreLines = true;
 
@@ -302,9 +296,7 @@ public:
 							bool addressCorrect = (*l)->getPhysicalAddr() == (*l)->calculatePhyscialAddr();
 							if(!addressCorrect) {
 								error = true;
-								if(verbose) {
-									std::cout << "   [CHANGED] 0x" << hex << (*l)->getPhysicalAddr() << " != 0x" << (*l)->calculatePhyscialAddr() << endl;
-								}
+								VERBOSE("   [CHANGED] 0x" << hex << (*l)->getPhysicalAddr() << " != 0x" << (*l)->calculatePhyscialAddr() << endl);
 							}
 						}
 
@@ -316,37 +308,35 @@ public:
 						allocationRetries = 0;
 					}
 				} catch (CacheSliceResetException& e) {
-					if(verbose) {
-						std::cout.imbue(std::locale());
-						std::cout << endl << "[ERROR] Set: " << dec << curSet << " - " << e.what()
-								<< " -- for address: 0x" << hex << ((CacheLine::ptr)e.line())->getPhysicalAddr() << " => " << std::flush;
-					}
+					std::cout.imbue(std::locale());
+					VERBOSE("[ERROR] Set: " << dec << curSet << " - " << e.what()
+								<< " -- for address: 0x" << hex << ((CacheLine::ptr)e.line())->getPhysicalAddr() << " => ")
 					moreWork = true;
 					moreLines = false;
 					doubleRuns = true;
 
 					discardLine((CacheLine*)e.line());
 				} catch (CacheLineException& e) {
-					if(verbose) {
-						std::cout << endl << "[ERROR] Set: " << dec << curSet << " - " << e.what() << " => " << std::flush;
-					} else if(printAllocationInformation) {
-						std::cout << e.what() << ", " << std::flush;
-					}
+					VERBOSE("[ERROR] Set: " << dec << curSet << " - " << e.what() << " => ")
+					else if(printAllocationInformation) { std::cout << e.what() << ", " << std::flush; }
 					moreWork = true;
 					moreLines = false;
 					doubleRuns = true;
 				}
 			}
 
-			if(verbose || printAllocationInformation) {
-				std::cout << "[SUCCESS SET: " << setfill(' ') << setw(5) << dec << curSet << "] " << endl;
+			VERBOSE("[SUCCESS SET: " << setfill(' ') << setw(5) << dec << curSet << "] " << endl)
+			else if(printAllocationInformation) {
+				if(curSet % 256 == 255) {
+					std::cout << endl << setfill(' ') << setw(5) << dec << "[SET: " << curSet << "] " << endl << std::flush;
+				} else if(curSet % 8 == 0) {
+					std::cout << "." << std::flush;
+				}
 			}
 		}
 
 		rePartitionSets();
 		write();
-
-		SetTester::clearArrays();
 	}
 
 	void print() const {

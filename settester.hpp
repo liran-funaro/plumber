@@ -15,14 +15,15 @@
 #include "cacheline.hpp"
 
 class SetTester {
-	enum {TEST_LINES_ARRAYS = 7};
-	static CacheLine::arr testLinesArrays[TEST_LINES_ARRAYS];
+	enum { TEST_LINES_ARRAYS = 7 };
+	CacheLine::arr testLinesArrays[TEST_LINES_ARRAYS];
 
 public:
-	const unsigned int maxTestLinesCount;
 	const unsigned long baseRuns;
-	unsigned long runs;
 	const double anomalyFactor;
+
+	unsigned long runs;
+	unsigned int maxTestLinesCount;
 
 	CacheLine::arr testLines;
 	unsigned int testLinesCount;
@@ -30,30 +31,42 @@ public:
 	unsigned long median_sum;
 	unsigned long median_count;
 	double avgMed;
-	bool verb;
 
-	SetTester(unsigned int maxTestLinesCount, unsigned long runs,
-			double anomalyFactor) : maxTestLinesCount(maxTestLinesCount), baseRuns(runs), runs(runs), anomalyFactor(anomalyFactor) {
-		init();
+	SetTester() : baseRuns(64), anomalyFactor(1.6),
+			runs(baseRuns), maxTestLinesCount(0),
+			testLines(NULL), testLinesCount(0), median_sum(0), median_count(0), avgMed(0) {
+		for (int i = 0; i < TEST_LINES_ARRAYS; ++i) {
+			testLinesArrays[i] = NULL;
+		}
+	}
+
+	~SetTester() {
+		clearArrays();
 	}
 
 	void doubleRuns() {
 		runs += baseRuns;
 	}
 
-	void init() {
+	void restartRuns() {
+		runs = baseRuns;
+	}
+
+	void init(unsigned int maxTestLinesCount) {
+		this->maxTestLinesCount = maxTestLinesCount;
+		clearArrays();
 		clear();
 		median_sum = 0;
 		median_count = 0;
 		avgMed = 0;
 	}
 
-	static CacheLine::arr getRandomArray(unsigned int maxTestLinesCount);
-	static void clearArrays();
+	CacheLine::arr getRandomArray();
+	void clearArrays();
 
 	void clear() {
 		testLinesCount = 0;
-		testLines = getRandomArray(maxTestLinesCount);
+		testLines = getRandomArray();
 	}
 
 	void add(const CacheLine::ptr line) {
@@ -145,9 +158,10 @@ public:
 	}
 
 	bool isOnSameSet(CacheLine::ptr line) {
-		add(line);
+		testLines[testLinesCount++] = testLines[0];
+		testLines[0] = line;
 		auto ret = isOnSameSet();
-		removeLast();
+		testLines[0] = testLines[--testLinesCount];
 		return ret;
 	}
 
@@ -157,29 +171,26 @@ public:
 		testLines[v] = tmp;
 	}
 
-	CacheLine::uset getSameSetGroup() {
-		CacheLine::uset res;
+	CacheLine::vec getSameSetGroup(unsigned int size) {
+		CacheLine::vec res;
 
 		if(!isOnSameSet()) {
 			return res;
 		}
 
+		// We only measure the first line access so,
+		// it must be in the same set as some of the others
+		unsigned int foundCount = 1;
+
 		// For each u: if without u the access time is short, then it is part of the set
-		for(unsigned int u=0; u < testLinesCount; ++u) {
-			swap(u, testLinesCount-1);
-
-			if(!isOnSameSet(testLinesCount-1)) {
-				res.insert(testLines[u]);
+		for(unsigned int u=testLinesCount-1; u >= foundCount && foundCount < size; u--) {
+			if(!isOnSameSet(u)) {
+				swap(foundCount++, u);
 			}
-
-			swap(u, testLinesCount-1);
 		}
 
-		// If for all the time was still long, then all must be in the same set
-		if(res.size() == 0) {
-			for(unsigned int v=0; v < testLinesCount; ++v) {
-				res.insert(testLines[v]);
-			}
+		if(foundCount >= size) {
+			res.insert(res.begin(), testLines, testLines + foundCount);
 		}
 
 		return res;
