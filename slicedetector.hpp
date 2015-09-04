@@ -58,7 +58,7 @@ class CacheSliceDetector {
 
 	unsigned int linesPerSet;
 
-	unsigned int bestRandomTestGroupSize;
+	unsigned int* bestRandomTestGroupSize;
 	unsigned int maxTestGroupRetires;
 	SetTester tester;
 	bool didWarmup;
@@ -68,8 +68,14 @@ class CacheSliceDetector {
 public:
 	CacheSliceDetector(bool verbose) :
 		slicesCount(0), availWays(0), linesPerSet(0),
-		bestRandomTestGroupSize(0), maxTestGroupRetires(0), didWarmup(false),
+		bestRandomTestGroupSize(NULL), maxTestGroupRetires(0), didWarmup(false),
 		verbose(verbose) {
+	}
+
+	~CacheSliceDetector() {
+		if(bestRandomTestGroupSize != NULL) {
+			delete[] bestRandomTestGroupSize;
+		}
 	}
 
 	void init(unsigned int slicesCount,	unsigned int availWays, unsigned int linesPerSet) {
@@ -78,41 +84,69 @@ public:
 		this->linesPerSet = linesPerSet;
 		calculateBestRandomTestGroupSize();
 
-		tester.init(bestRandomTestGroupSize + 1);
+		unsigned int maxTestGroupSize = max_element(bestRandomTestGroupSize, bestRandomTestGroupSize+slicesCount);
+		tester.init(maxTestGroupSize + 1);
 	}
 
 	void calculateBestRandomTestGroupSize() {
-		double minExpectedTestRuns = std::numeric_limits<double>::infinity();
-		unsigned int correspondingSize = 3;
+		bestRandomTestGroupSize = new auto[slicesCount];
 
-		for(unsigned int size=availWays+1; size < minExpectedTestRuns; size++) {
-			double curE = calculateExpectedTestsCountForGroupSize(size);
-			if(curE < minExpectedTestRuns) {
-				minExpectedTestRuns = curE;
-				correspondingSize = size;
+		for(unsigned int slice=0; slice < slicesCount; slice++) {
+			double minExpectedTestRuns = std::numeric_limits<double>::infinity();
+			unsigned int correspondingSize = availWays+1;
+
+			for(unsigned int size=availWays+1; size < minExpectedTestRuns; size++) {
+				double curE = calculateExpectedTestsCountForGroupSize(size, slicesCount-slice);
+				if(curE < minExpectedTestRuns) {
+					minExpectedTestRuns = curE;
+					correspondingSize = size;
+				}
 			}
+
+			bestRandomTestGroupSize[slice] = correspondingSize;
+			maxTestGroupRetires = max(maxTestGroupRetires, (unsigned int)pow(minExpectedTestRuns, 4.));
+
+			VERBOSE("[CALC Slice: " << slice << "] Best random test group size: " << correspondingSize << endl);
+			VERBOSE("[CALC Slice: " << slice << "] Expected test runs: " << minExpectedTestRuns << endl);
 		}
-
-		bestRandomTestGroupSize = correspondingSize;
-		maxTestGroupRetires = pow(minExpectedTestRuns, 4.);
-
-		VERBOSE("[CALC] Best random test group size: " << bestRandomTestGroupSize << endl);
-		VERBOSE("[CALC] Expected test runs: " << minExpectedTestRuns << endl);
 	}
 
-	double calculateExpectedTestsCountForGroupSize(unsigned int size) {
+	double calculateExpectedTestsCountForGroupSize(unsigned int size, unsigned int slices) {
+		double S = size;
+		double A = availWays;
+		double Z = slices;
+		// First we find the expected number of tries until we find a random
+		// group of size S where at least A of them are in the same slice as the first line
+		// in the group (out of Z slices)
 		//
-		//                       1                               availWays-1
-		// E = ---------------------------------------------- + ------------- * (size-1)
-		//          (  slicesCount-1  ) ^ (size - availWays)      availWays
-		//      1 - ( --------------- )
-		//          (   slicesCount   )
+		//             1
+		// E1 = -----------------
+		//		     |Z-1|^(S-A)
+		//		 1 - |---|
+		//	    	 | Z |
+		//
+		double q = (Z-1.) / Z;
+		double E1 = 1. / (1. - pow(q, S-A));
 
-		double q = double(slicesCount-1)/double(slicesCount);
-		double left = 1./(1. - pow(q, double(size-availWays)));
-		double right = (double(availWays-1)/double(availWays)) * double(size-1);
+		// Then we calculate the expected number of tries until we found A-1 lines in
+		// the same slice as the first line out of the S lines.
+		// Since we measured a long access time to the first item, then we have at-least
+		// A+1 items in the same slice. The first item is always in the slice since we only measure
+		// the access time to it.
+		// So, we need to find another A-1 lines out of x lines that are in the same set in a group of S-1 items.
+		// Where x is between A to S-1 and each x have its own probability.
+		//
+		//	                          | 1 |^x   |Z-1|^(S-1-x)    A-1
+		//	E2 = Sum for x=A to S-1:  |---|   * |---|         * ----- * (S-1)
+		//	                          | Z |     | Z |            x+1
+		//
+		double E2 = 0.;
+		double p = 1./Z;
+		for(unsigned int x=A; x <= S-1; x++) {
+			E2 += pow(p, x) * pow(q, S-1-x) * ( (A-1.)/(x+1.) ) * (S-1.);
+		}
 
-		return left + right;
+		return E1 + E2;
 	}
 
 	void doubleRuns() {
@@ -129,11 +163,11 @@ public:
 		}
 	}
 
-	CacheLine::vec findTestGroupForSlice(CacheLine::vec& fromLines) {
+	CacheLine::vec findTestGroupForSlice(CacheLine::vec& fromLines, unsigned int curSlice) {
 		for(unsigned int i=0; i < maxTestGroupRetires; ++i) {
 			// Most of the times, the lines won't be in the same set (short access time)
 			tester.clear();
-			tester.addRandom(fromLines, bestRandomTestGroupSize);
+			tester.addRandom(fromLines, bestRandomTestGroupSize[curSlice]);
 
 			auto testGroup = tester.getSameSetGroup(availWays);
 			if(testGroup.size() < availWays) {
@@ -179,7 +213,7 @@ public:
 		}
 
 		VERBOSE(", Find-Group");
-		CacheLine::vec testGroup = findTestGroupForSlice(undetected);
+		CacheLine::vec testGroup = findTestGroupForSlice(undetected, curSlice);
 
 		if (testGroup.size() < availWays) {
 			VERBOSE(" [FAILED] Could not detect small group in the same slice" << endl);

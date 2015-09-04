@@ -52,7 +52,8 @@ elif [ $1 == "perf-touch" ]; then
 
 	cd ~/workspace/linux/tools/perf
 
-	sleep 1
+	sleep 15
+	echo "Start perf-stat"
 	sudo ./perf stat \
 		-e LLC-loads-misses:u,LLC-loads:u \
 		-e L1-dcache-loads:u,L1-dcache-load-misses:u \
@@ -60,19 +61,28 @@ elif [ $1 == "perf-touch" ]; then
 		-c sleep ${timeSec}
  
 	echo "touch stop" | sudo tee -a $"/tmp/plumber" > /dev/null
-elif [ $1 == "perf" ]; then
+elif [ $1 == "perf-stat" ]; then
 	shift
 	timeSec=$1
 	shift
 
 	cd ~/workspace/linux/tools/perf
 
-	sleep 1
 	sudo ./perf stat \
 		-e LLC-loads-misses:u,LLC-loads:u \
 		-e L1-dcache-loads:u,L1-dcache-load-misses:u \
 		-p $(pidof plumber | tr ' ' ,) \
 		-c sleep ${timeSec}
+elif [ $1 == "perf-top" ]; then
+	shift
+
+	cd ~/workspace/linux/tools/perf
+
+	sudo ./perf top \
+		-e LLC-loads-misses:u,LLC-loads:u \
+		-e L1-dcache-loads:u,L1-dcache-load-misses:u \
+		-e cycles:u \
+		-p $(pidof plumber | tr ' ' ,)
 else
 	echo $@ | sudo tee -a $"/tmp/plumber" > /dev/null
 fi

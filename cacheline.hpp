@@ -28,6 +28,7 @@
 #include <sys/io.h>
 
 #include "ObjectPoll.h"
+#include "plumber.hpp"
 
 using namespace std;
 
@@ -46,6 +47,8 @@ public:
 		return _line;
 	}
 };
+
+class CacheListException : public PlumberException { using PlumberException::PlumberException; };
 
 class CacheSliceResetException: public CacheLineException {
 public:
@@ -78,36 +81,14 @@ public:
 
 	public:
 		lst() : _first(NULL), _last(NULL), _length(0) {}
-
-		void insertBack(ptr l) {
-			if(_last != NULL) {
-				_last->setNext(l);
-			} else {
-				_first = l;
-			}
-
-			_last = l;
-			_length += 1;
-			_last->setNext(NULL);
-		}
-
-		void insertBack(const lst& l) {
-			if(_last != NULL) {
-				_last->setNext(l.front());
-			} else {
-				_first = l.front();
-			}
-
-			_last = l.back();
-
-			// We already added the first line
-			_length += l.size();
-			_last->setNext(NULL);
-		}
-
+		void insertBack(ptr l);
+		void insertBack(const lst& l);
+		ptr popFront();
+		vector<lst> partition(unsigned int size);
 		ptr front() const { return _first; };
 		ptr back() const { return _last; };
 		unsigned long size() const { return _length; }
+		void validate();
 	};
 
 private:
@@ -174,8 +155,8 @@ public:
 
 	void flushSets();
 
-	void polluteSets(unsigned int setSize, unsigned long runs, volatile bool& continueFlag,
-			unsigned long eachSetRuns = 1, bool disableInterupts = false);
+	static void polluteSets(arr partitionsArray, unsigned long partitionsCount,
+			volatile bool& continueFlag, bool disableInterupts = false);
 
 	/*********************************************************************************************
 	 * Poll Control

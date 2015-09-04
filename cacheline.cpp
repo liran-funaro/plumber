@@ -54,10 +54,10 @@ void CacheLine::validatePhyscialAddr() const {
 void CacheLine::validateAll() const {
 	const CacheLine* curLine = this;
 
-	while(curLine != NULL) {
+	do {
 		curLine->validatePhyscialAddr();
 		curLine = curLine->getNext();
-	}
+	} while(curLine != this);
 }
 
 void CacheLine::setCacheSlice(unsigned long _cacheSlice) {
@@ -85,49 +85,29 @@ unsigned long CacheLine::calculatePhyscialAddr() const {
  *********************************************************************************************/
 void CacheLine::flushSets() {
 	ptr curline = this;
-	while (curline != NULL) {
+	do {
 		curline->flushFromCache();
-		curline = ((volatile ptr) curline)->next;
-	}
+		curline = curline->getNext();
+	} while (curline != this);
 }
 
-void CacheLine::polluteSets(unsigned int setSize, unsigned long runs, volatile bool& continueFlag,
-		unsigned long eachSetRuns, bool disableInterupts) {
+void CacheLine::polluteSets(CacheLine::arr partitionsArray, unsigned long partitionsCount,
+		volatile bool& continueFlag, bool disableInterupts) {
 	continueFlag = true;
 
 	if(disableInterupts) {
 		iopl(3);
+		__asm__ __volatile__("cli");
 	}
 
-	for (unsigned long run = 0; continueFlag && (runs == 0 || run < runs); ++run) {
-		if(disableInterupts) {
-			__asm__ __volatile__("cli");
+	while (continueFlag) {
+		for(unsigned long i=0; i < partitionsCount; i++) {
+			partitionsArray[i] = ((volatile CacheLine::ptr) partitionsArray[i])->next;
 		}
+	}
 
-		ptr curline = this;
-
-		unsigned long setLinesCount = 0;
-		unsigned long setLinesRuns = eachSetRuns;
-		ptr setline = this;
-
-		while (curline != NULL) {
-			curline = ((volatile ptr) curline)->next;
-
-			setLinesCount = (setLinesCount + 1) % setSize;
-			if(setLinesCount == 0) {
-				setLinesRuns -= 1;
-				if(setLinesRuns == 0) {
-					setline = curline;
-					setLinesRuns = eachSetRuns;
-				} else {
-					curline = setline;
-				}
-			}
-		}
-
-		if(disableInterupts) {
-			__asm__ __volatile__("sti");
-		}
+	if(disableInterupts) {
+		__asm__ __volatile__("sti");
 	}
 }
 
@@ -172,6 +152,95 @@ void* CacheLine::operator new(size_t size) {
 	}
 
 	return poll->newObject();
+}
+
+/*********************************************************************************************
+ * CacheLine::lst
+ *********************************************************************************************/
+void CacheLine::lst::insertBack(ptr l) {
+	if (l == NULL) {
+		return;
+	}
+
+	if (_last != NULL) {
+		_last->setNext(l);
+	} else {
+		_first = l;
+	}
+
+	_last = l;
+	_length += 1;
+	_last->setNext(_first);
+}
+
+void CacheLine::lst::insertBack(const lst& l) {
+	if (_last != NULL) {
+		_last->setNext(l.front());
+	} else {
+		_first = l.front();
+	}
+
+	_last = l.back();
+
+	// We already added the first line
+	_length += l.size();
+	_last->setNext(_first);
+}
+
+CacheLine::ptr CacheLine::lst::popFront() {
+	ptr ret = front();
+	if(ret != NULL) {
+		_first = ret->getNext();
+		if(_first == ret) {
+			_first = NULL;
+			_last = NULL;
+		}
+
+		if(_last != NULL) {
+			_last->setNext(_first);
+		}
+
+		_length -= 1;
+	}
+	return ret;
+}
+
+vector<CacheLine::lst> CacheLine::lst::partition(unsigned int size) {
+	vector<lst> ret(size);
+
+	unsigned int pos = 0;
+	for(ptr l = popFront(); l != NULL; l = popFront()) {
+		ret[pos].insertBack(l);
+		pos = (pos+1) % size;
+	}
+
+	return ret;
+}
+
+void CacheLine::lst::validate() {
+	CacheLine::ptr curline = front();
+
+	CacheLine::uset lineSet;
+	unsigned long count = 0;
+
+	do {
+		lineSet.insert(curline);
+		count += 1;
+		curline = curline->getNext();
+	} while (curline != front());
+
+	if (count != lineSet.size()) {
+		stringstream ss;
+		ss << "Repeating items in list. List length is " << count << ", but only "
+				<< lineSet.size() << " unique items.";
+		throw CacheListException(ss);
+	}
+
+	if(count != size()) {
+		throw CacheListException("List length is not correct.");
+	}
+
+	front()->validateAll();
 }
 
 /*********************************************************************************************

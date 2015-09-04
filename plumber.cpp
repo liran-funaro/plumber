@@ -44,8 +44,7 @@ class Busy : exception {};
 typedef struct TouchInfo {
 	volatile int touchSet;
 	volatile unsigned int touchLinesPerSet;
-	volatile unsigned long touchIterations;
-	volatile unsigned long eachSetRuns;
+	volatile unsigned long partitions;
 	volatile bool disableInterupts;
 	volatile bool flushBefore;
 	volatile bool flushAfter;
@@ -57,11 +56,10 @@ typedef struct TouchInfo {
 
 class TouchWorker {
 public:
-	TouchInfo info;
-
-	volatile Line::ptr startLine;
-
 	Allocator& allocator;
+	volatile Line::arr partitionsArray;
+
+	TouchInfo info;
 
 	pthread_mutex_t mutex;
 	pthread_cond_t cv;
@@ -69,29 +67,46 @@ public:
 	volatile static bool touchForever;
 
 public:
-	TouchWorker(Allocator& allocator) : allocator(allocator) {
+	TouchWorker(Allocator& allocator) : allocator(allocator), partitionsArray(NULL) {
 		mutex = PTHREAD_MUTEX_INITIALIZER;
 		pthread_cond_init(&cv, NULL);
-
 		restart();
+	}
+
+	~TouchWorker() {
+		discardPartitionsArray();
 	}
 
 	static TouchInfo defaultInfo() {
 		TouchInfo res;
 		res.op = TouchInfo::OP_TOUCH;
-		res.touchIterations  = 0;		// Forever
 		res.touchSet 		 = -1;		// All sets
-		res.eachSetRuns		 = 1;
 		res.touchLinesPerSet = 1;
+		res.partitions		 = 1;
 		res.disableInterupts = false;
 		res.flushBefore 	 = false;
 		res.flushAfter 		 = false;
 		return res;
 	}
 
+	void discardPartitionsArray() {
+		if(partitionsArray != NULL) {
+			delete[] partitionsArray;
+			partitionsArray = NULL;
+		}
+	}
+
+	void allocatePartitionsArray(vector<CacheLine::lst> partitions) {
+		discardPartitionsArray();
+		partitionsArray = new CacheLine::ptr[partitions.size()];
+		for(unsigned int i=0; i < partitions.size(); i++) {
+			partitionsArray[i] = partitions[i].front();
+		}
+	}
+
 	void restart() {
 		info = defaultInfo();
-		startLine = NULL;
+		discardPartitionsArray();
 	}
 
 	void sendJob(const TouchInfo& inputInfo) {
@@ -111,8 +126,9 @@ public:
 			} else {
 				lineList = allocator.getSet(info.touchSet, info.touchLinesPerSet);
 			}
-			startLine = lineList.front();
 			length = lineList.size();
+			auto partitions = lineList.partition(info.partitions);
+			allocatePartitionsArray(partitions);
 
 			// Signal only if successful
 			pthread_cond_signal(&cv);
@@ -159,23 +175,31 @@ private:
 		return NULL;
 	}
 
+	void flushPartitionsArray() {
+		if(partitionsArray != NULL) {
+			for(unsigned int i = 0; i < info.partitions; i++) {
+				partitionsArray[i]->flushSets();
+			}
+		}
+	}
+
 	void workerThread() {
 		lock();
 		while(waitForJob()) {
-			if(startLine != NULL) {
+			if(partitionsArray != NULL) {
 				auto start = gettime();
 				switch(info.op) {
 				case TouchInfo::OP_TOUCH:
-					if(info.flushBefore) { startLine->flushSets(); }
+					if(info.flushBefore) { flushPartitionsArray(); }
 
-					startLine->polluteSets(info.touchLinesPerSet, info.touchIterations, TouchWorker::touchForever,
-							info.eachSetRuns, info.disableInterupts);
+					CacheLine::polluteSets(partitionsArray, info.partitions, TouchWorker::touchForever,
+							info.disableInterupts);
 
-					if(info.flushAfter) { startLine->flushSets(); }
+					if(info.flushAfter) { flushPartitionsArray(); }
 					break;
 
 				case TouchInfo::OP_FLUSH:
-					startLine->flushSets();
+					flushPartitionsArray();
 					break;
 				default:
 					continue;
@@ -289,14 +313,10 @@ int main(int argc, const char* argv[]) {
 							t.touchSet = msg.popNumberToken();
 						} else if(touchOp == "lines" || touchOp == "l") {
 							t.touchLinesPerSet = msg.popNumberToken();
-						} else if(touchOp == "iterations" || touchOp == "i") {
-							t.touchIterations = msg.popNumberToken();
+						} else if(touchOp == "partitions" || touchOp == "p") {
+							t.partitions = msg.popNumberToken();
 						} else if(touchOp == "disable-interrupts") {
 							t.disableInterupts = true;
-						} else if(touchOp == "set-i") {
-							t.eachSetRuns = msg.popNumberToken();
-						} else if(touchOp == "forever" || touchOp == "f") {
-							t.touchIterations = 0;
 						} else if(touchOp == "stop") {
 							t.op = TouchInfo::OP_STOP;
 						} else if(touchOp == "flush") {
