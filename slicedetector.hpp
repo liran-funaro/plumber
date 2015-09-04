@@ -89,6 +89,9 @@ public:
 	}
 
 	void calculateBestRandomTestGroupSize() {
+		if(bestRandomTestGroupSize != NULL) {
+			delete[] bestRandomTestGroupSize;
+		}
 		bestRandomTestGroupSize = new auto[slicesCount];
 
 		for(unsigned int slice=0; slice < slicesCount; slice++) {
