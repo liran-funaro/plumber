@@ -9,6 +9,11 @@
 #include "timing.h"
 
 void CacheLineAllocator::allocateAllSets() {
+	VERBOSE("[ALLOCATION] Init " << endl)
+	else if(printAllocationInformation) {std::cout << "Initial allocation" << endl;}
+	allocateSet(0, 2 * cacheInfo.cache_slices * linesPerSet);
+	VERBOSE("[SUCCESS] Total: " << ((double)CacheLine::getTotalAllocatedPoll() / (double)(1<<30)) << " GB" << endl);
+
 	detector.init(cacheInfo.cache_slices, availableWays, linesPerSet);
 
 	for(unsigned int curSet=0; curSet < setsPerSlice; ++curSet) {
@@ -44,7 +49,8 @@ void CacheLineAllocator::allocateAllSets() {
 				detector.detectAllCacheSlices(setLines);
 				moreWork = false;
 			} catch (NeedMoreLinesException& e) {
-				VERBOSE("[ERROR] Set: " << dec <<curSet << " - " << e.what() << " => ");
+				VERBOSE("[ERROR] Set: " << dec <<curSet << " - " << e.what() << " => ")
+				else if(printAllocationInformation) {std::cout << e.what() << ", " << endl;}
 				moreWork = true;
 				moreLines = true;
 
@@ -94,30 +100,29 @@ void CacheLineAllocator::allocateAllSets() {
 	}
 
 	rePartitionSets();
-	write();
 }
 
 CacheLine::lst CacheLineAllocator::getSet(int set, unsigned int count) {
-		auto curSet = getSet(set);
-		CacheLine::lst ret;
-
-		for (auto l = curSet.begin(); l != curSet.end() && ret.size() < count; l++) {
-			ret.insertBack(*l);
-		}
-
-		if (ret.size() < count) {
-			throw LineAllocatorException("Not enough lines in set");
-		}
-
-		ret.validate();
-
-		return ret;
-	}
-
-CacheLine::lst CacheLineAllocator::getAllSets(unsigned int countPerSet) {
+	auto curSet = getSet(set);
 	CacheLine::lst ret;
 
-	for(unsigned int set=0; set < getSetsCount(); set++) {
+	for (auto l = curSet.begin(); l != curSet.end() && ret.size() < count; l++) {
+		ret.insertBack(*l);
+	}
+
+	if (ret.size() < count) {
+		throw LineAllocatorException("Not enough lines in set");
+	}
+
+	ret.validate();
+
+	return ret;
+}
+
+CacheLine::lst CacheLineAllocator::getSets(unsigned int beginSet, unsigned int endSet, unsigned int countPerSet) {
+	CacheLine::lst ret;
+
+	for(unsigned int set=beginSet; set <= endSet; set++) {
 		auto setList = getSet(set, countPerSet);
 		ret.insertBack(setList);
 	}

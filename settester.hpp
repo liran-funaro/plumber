@@ -20,7 +20,6 @@ class SetTester {
 
 public:
 	const unsigned long baseRuns;
-	const double anomalyFactor;
 
 	unsigned long runs;
 	unsigned int maxTestLinesCount;
@@ -28,13 +27,21 @@ public:
 	CacheLine::arr testLines;
 	unsigned int testLinesCount;
 
-	unsigned long median_sum;
-	unsigned long median_count;
-	double avgMed;
+	unsigned long hitMedianSum;
+	unsigned long hitMedianCount;
+	double avgHitAccessTime;
 
-	SetTester() : baseRuns(64), anomalyFactor(1.6),
+	unsigned long missMedianSum;
+	unsigned long missMedianCount;
+	double avgMissAccessTime;
+	unsigned int llcMaxAccessTime;
+
+	SetTester() : baseRuns(16),
 			runs(baseRuns), maxTestLinesCount(0),
-			testLines(NULL), testLinesCount(0), median_sum(0), median_count(0), avgMed(0) {
+			testLines(NULL), testLinesCount(0),
+			hitMedianSum(0), hitMedianCount(0),	avgHitAccessTime(0),
+			missMedianSum(0), missMedianCount(0), avgMissAccessTime(0),
+			llcMaxAccessTime(0) {
 		for (int i = 0; i < TEST_LINES_ARRAYS; ++i) {
 			testLinesArrays[i] = NULL;
 		}
@@ -56,9 +63,13 @@ public:
 		this->maxTestLinesCount = maxTestLinesCount;
 		clearArrays();
 		clear();
-		median_sum = 0;
-		median_count = 0;
-		avgMed = 0;
+		hitMedianSum = 0;
+		hitMedianCount = 0;
+		avgHitAccessTime = 0;
+		missMedianSum = 0;
+		missMedianCount = 0;
+		avgMissAccessTime = 0;
+		llcMaxAccessTime = 0;
 	}
 
 	CacheLine::arr getRandomArray();
@@ -128,34 +139,11 @@ public:
 		return false;
 	}
 
-	int time() {
-		return time(testLinesCount);
-	}
-
 	int time(unsigned int count);
-	int time1(unsigned int count);
-	int time2(unsigned int count);
-	int time3(unsigned int count);
+	int time() { return time(testLinesCount); }
 
-	void warmupRun() {
-		if(testLinesCount == 0) {
-			return;
-		}
-
-		int median = time();
-		median_sum += median;
-		median_count += 1;
-		avgMed = (double) median_sum / (double) median_count;
-	}
-
-	bool isOnSameSet() {
-		return isOnSameSet(testLinesCount);
-	}
-
-	bool isOnSameSet(unsigned int count) {
-		// If time higher then avg., then they on the same set
-		return ((double)time(count)) > (avgMed * anomalyFactor);
-	}
+	bool isOnSameSet(unsigned int count);
+	bool isOnSameSet() { return isOnSameSet(testLinesCount); }
 
 	bool isOnSameSet(CacheLine::ptr line) {
 		testLines[testLinesCount++] = testLines[0];
@@ -165,36 +153,34 @@ public:
 		return ret;
 	}
 
+	int timeMiss(CacheLine::ptr line);
+	void warmupRun() {
+		if(testLinesCount == 0) {
+			return;
+		}
+
+		for(unsigned int i=0; i < testLinesCount; i++) {
+			hitMedianSum += time();
+			hitMedianCount += 1;
+			avgHitAccessTime = (double) hitMedianSum / (double) hitMedianCount;
+		}
+
+		for(unsigned int i=0; i < testLinesCount; i++) {
+			missMedianSum += timeMiss(testLines[i]);
+			missMedianCount += 1;
+			avgMissAccessTime = (double) missMedianSum / (double) missMedianCount;
+		}
+
+		llcMaxAccessTime = avgHitAccessTime*0.85 + avgMissAccessTime*0.15;
+	}
+
 	void swap(unsigned int u, unsigned int v) {
 		CacheLine::ptr tmp = testLines[u];
 		testLines[u] = testLines[v];
 		testLines[v] = tmp;
 	}
 
-	CacheLine::vec getSameSetGroup(unsigned int size) {
-		CacheLine::vec res;
-
-		if(!isOnSameSet()) {
-			return res;
-		}
-
-		// We only measure the first line access so,
-		// it must be in the same set as some of the others
-		unsigned int foundCount = 1;
-
-		// For each u: if without u the access time is short, then it is part of the set
-		for(unsigned int u=testLinesCount-1; u >= foundCount && foundCount < size; u--) {
-			if(!isOnSameSet(u)) {
-				swap(foundCount++, u);
-			}
-		}
-
-		if(foundCount >= size) {
-			res.insert(res.begin(), testLines, testLines + foundCount);
-		}
-
-		return res;
-	}
+	CacheLine::vec getSameSetGroup(unsigned int availableWays);
 };
 
 #endif /* PLUMBER_SETTESTER_HPP_ */

@@ -59,7 +59,7 @@ class CacheSliceDetector {
 	unsigned int linesPerSet;
 
 	unsigned int* bestRandomTestGroupSize;
-	unsigned int maxTestGroupRetires;
+	unsigned int* maxTestGroupRetires;
 	SetTester tester;
 	bool didWarmup;
 
@@ -68,14 +68,24 @@ class CacheSliceDetector {
 public:
 	CacheSliceDetector(bool verbose) :
 		slicesCount(0), availWays(0), linesPerSet(0),
-		bestRandomTestGroupSize(NULL), maxTestGroupRetires(0), didWarmup(false),
+		bestRandomTestGroupSize(NULL), maxTestGroupRetires(NULL), didWarmup(false),
 		verbose(verbose) {
 	}
 
 	~CacheSliceDetector() {
+		discardTestCalculationArrays();
+	}
+
+	void discardTestCalculationArrays() {
 		if(bestRandomTestGroupSize != NULL) {
 			delete[] bestRandomTestGroupSize;
 		}
+		bestRandomTestGroupSize = NULL;
+
+		if(maxTestGroupRetires != NULL) {
+			delete[] maxTestGroupRetires;
+		}
+		maxTestGroupRetires = NULL;
 	}
 
 	void init(unsigned int slicesCount,	unsigned int availWays, unsigned int linesPerSet) {
@@ -84,22 +94,22 @@ public:
 		this->linesPerSet = linesPerSet;
 		calculateBestRandomTestGroupSize();
 
-		unsigned int maxTestGroupSize = max_element(bestRandomTestGroupSize, bestRandomTestGroupSize+slicesCount);
+		unsigned int maxTestGroupSize = *max_element(bestRandomTestGroupSize, bestRandomTestGroupSize+slicesCount);
 		tester.init(maxTestGroupSize + 1);
 	}
 
 	void calculateBestRandomTestGroupSize() {
-		if(bestRandomTestGroupSize != NULL) {
-			delete[] bestRandomTestGroupSize;
-		}
-		bestRandomTestGroupSize = new auto[slicesCount];
+		discardTestCalculationArrays();
+		bestRandomTestGroupSize = new unsigned int[slicesCount];
+		maxTestGroupRetires = new unsigned int[slicesCount];
 
 		for(unsigned int slice=0; slice < slicesCount; slice++) {
+			unsigned int undetectedSlices = slicesCount-slice;
 			double minExpectedTestRuns = std::numeric_limits<double>::infinity();
 			unsigned int correspondingSize = availWays+1;
 
 			for(unsigned int size=availWays+1; size < minExpectedTestRuns; size++) {
-				double curE = calculateExpectedTestsCountForGroupSize(size, slicesCount-slice);
+				double curE = calculateExpectedTestsCountForGroupSize(size, undetectedSlices);
 				if(curE < minExpectedTestRuns) {
 					minExpectedTestRuns = curE;
 					correspondingSize = size;
@@ -107,10 +117,11 @@ public:
 			}
 
 			bestRandomTestGroupSize[slice] = correspondingSize;
-			maxTestGroupRetires = max(maxTestGroupRetires, (unsigned int)pow(minExpectedTestRuns, 4.));
+			maxTestGroupRetires[slice] = calculateMaximumTestForGroupSize(correspondingSize, undetectedSlices);
 
-			VERBOSE("[CALC Slice: " << slice << "] Best random test group size: " << correspondingSize << endl);
+			VERBOSE("[CALC Slice: " << slice << "] Best random test group size: " << bestRandomTestGroupSize[slice] << endl);
 			VERBOSE("[CALC Slice: " << slice << "] Expected test runs: " << minExpectedTestRuns << endl);
+			VERBOSE("[CALC Slice: " << slice << "] Max test runs: " << dec << maxTestGroupRetires[slice] << endl);
 		}
 	}
 
@@ -140,16 +151,45 @@ public:
 		// Where x is between A to S-1 and each x have its own probability.
 		//
 		//	                          | 1 |^x   |Z-1|^(S-1-x)    A-1
-		//	E2 = Sum for x=A to S-1:  |---|   * |---|         * ----- * (S-1)
+		//	E2 = Sum for x=A to S-1:  |---|   * |---|         * ----- * S
 		//	                          | Z |     | Z |            x+1
 		//
 		double E2 = 0.;
-		double p = 1./Z;
-		for(unsigned int x=A; x <= S-1; x++) {
-			E2 += pow(p, x) * pow(q, S-1-x) * ( (A-1.)/(x+1.) ) * (S-1.);
+
+		// If the size is exactly one more then the available ways, then we know that all the group is
+		// in the same set, not need to check again
+		if(size > availWays+1) {
+			double p = 1./Z;
+			for(unsigned int x=A; x <= S-1; x++) {
+				E2 += pow(p, x) * pow(q, S-1-x) * ( (A-1.)/(x+1.) ) * S;
+			}
 		}
 
 		return E1 + E2;
+	}
+
+	double calculateMaximumTestForGroupSize(unsigned int size, unsigned int slices) {
+		double S = size;
+		double A = availWays;
+		double Z = slices;
+
+		double q = (Z-1.) / Z;
+		// The probability to fail at least N times is:
+		//
+		// 						   |Z-1|^(S-A)*N
+		// P(fail*N) = P(fail)^N = |---|
+		//           			   | Z |
+		//
+		// We want N big enough that the probability to fail will be epsilon:
+		//
+		// P(fail*N) < epsilon  ==> (S-A)*N*log(q) < log(epsilon) ==>
+		//
+		//	        log(epsilon)
+		// ==> N > ---------------
+		//		    (S-A) * log(q)
+
+		double logEpsilon = -100;
+		return ( logEpsilon / ( (S-A) * log(q) ) ) + 1.;
 	}
 
 	void doubleRuns() {
@@ -167,17 +207,16 @@ public:
 	}
 
 	CacheLine::vec findTestGroupForSlice(CacheLine::vec& fromLines, unsigned int curSlice) {
-		for(unsigned int i=0; i < maxTestGroupRetires; ++i) {
+		for(unsigned int i=0; i < maxTestGroupRetires[curSlice]; ++i) {
 			// Most of the times, the lines won't be in the same set (short access time)
 			tester.clear();
 			tester.addRandom(fromLines, bestRandomTestGroupSize[curSlice]);
 
 			auto testGroup = tester.getSameSetGroup(availWays);
-			if(testGroup.size() < availWays) {
-				continue;
-			}
 
-			return testGroup;
+			if(testGroup.size() >= availWays) {
+				return testGroup;
+			}
 		}
 
 		return CacheLine::vec();
@@ -210,7 +249,7 @@ public:
 		VERBOSE("[SLICE: " << setfill(' ') << setw(3) << dec << curSlice << "] Find-Undetected");
 		CacheLine::vec undetected = getAllUndetectedLines(lines);
 
-		if(undetected.size() < bestRandomTestGroupSize) {
+		if(undetected.size() < bestRandomTestGroupSize[curSlice]) {
 			VERBOSE(" [FAILED] Not enough undetected lines" << endl);
 			throw NeedMoreLinesException("Not enough undetected lines");
 		}
@@ -221,10 +260,6 @@ public:
 		if (testGroup.size() < availWays) {
 			VERBOSE(" [FAILED] Could not detect small group in the same slice" << endl);
 			throw NeedMoreLinesException("Could not detect small group in the same slice");
-		} else {
-			if(verbose) {
-				std::cout << ", " << std::flush;
-			}
 		}
 
 		VERBOSE(", Find-Entire-Set");
@@ -291,7 +326,9 @@ public:
 		}
 
 		if(verbose){
-			std::cout << "[SUCCESS] Avg. median runtime: " << tester.avgMed << endl;
+			std::cout << "[SUCCESS] "
+					  << "Hit access time: " << tester.avgHitAccessTime << " - "
+					  << "Miss access time: " << tester.avgMissAccessTime << endl;
 		}
 
 		didWarmup = true;

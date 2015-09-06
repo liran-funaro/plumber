@@ -56,32 +56,69 @@ inline void clearLines(CacheLine::arr lines, unsigned long count) {
 	mfence();
 }
 
-inline int time_lines(CacheLine::arr lines, unsigned long numbersOfWays,
-		unsigned long runs) __attribute__((always_inline));
+inline int time_last_access(CacheLine::arr lines, unsigned long size, unsigned int loc)
+		__attribute__((always_inline));
+inline int time_last_access(CacheLine::arr lines, unsigned long size, unsigned int loc) {
+	clearLines(lines, size);
+	// Ensure the first address is cached by accessing it.
+	g_dummy[loc] += *(volatile int *) lines[0];
+	mfence();
+	// Now pull the other addresses through the cache too.
+	for (unsigned int i = 1; i < size; i++) {
+		g_dummy[loc] += *(volatile int *) lines[i];
+	}
+	mfence();
+	// See whether the first address got evicted from the cache by
+	// timing accessing it.
+	return time_access(lines[0], loc);
+}
 
-inline int time_lines(CacheLine::arr lines, unsigned long numbersOfWays,
-		unsigned long runs) {
+inline int time_miss_access(CacheLine::ptr line, unsigned int loc)
+		__attribute__((always_inline));
+inline int time_miss_access(CacheLine::ptr line, unsigned int loc) {
+	line->flushFromCache();
+	mfence();
+	return time_access(line,loc);
+}
+
+inline int time_line_miss_access(CacheLine::ptr line, unsigned long runs) __attribute__((always_inline));
+inline int time_line_miss_access(CacheLine::ptr line, unsigned long runs) {
 	int times[runs];
 	unsigned int loc = rand() % DUMMY_SIZE;
-
-	clearLines(lines, numbersOfWays);
 
 	iopl(3);
 	__asm__ __volatile__("cli");
 	for (unsigned long run = 0; run < runs; run++) {
-		// Ensure the first address is cached by accessing it.
-		g_dummy[loc] += *(volatile int *) lines[0];
-		mfence();
-		// Now pull the other addresses through the cache too.
-		for (unsigned int i = 1; i < numbersOfWays; i++) {
-			g_dummy[loc] += *(volatile int *) lines[i];
-		}
-		mfence();
-		// See whether the first address got evicted from the cache by
-		// timing accessing it.
-		times[run] = time_access(lines[0], loc);
+		times[run] = time_miss_access(line, loc);
 	}
 	__asm__ __volatile__("sti");
+
+	return *std::min_element(times, times + runs);
+}
+
+inline void time_lines_safe(CacheLine::arr lines, unsigned long size, unsigned int loc,
+		int* times, unsigned long runs)  __attribute__((always_inline));
+inline void time_lines_safe(CacheLine::arr lines, unsigned long size, unsigned int loc,
+		int* times, unsigned long runs) {
+	iopl(3);
+	__asm__ __volatile__("cli");
+	for (unsigned long run = 0; run < runs; run++) {
+		times[run] = time_last_access(lines, size, loc);
+	}
+	__asm__ __volatile__("sti");
+}
+
+inline int time_lines(CacheLine::arr lines, unsigned long size,
+		unsigned long runs) __attribute__((always_inline));
+
+inline int time_lines(CacheLine::arr lines, unsigned long size,
+		unsigned long runs) {
+	int times[runs];
+	unsigned int loc = rand() % DUMMY_SIZE;
+
+	clearLines(lines, size);
+	time_lines_safe(lines, size, loc, times, runs);
+
 	// Find the median time.  We use the median in order to discard
 	// outliers.  We want to discard outlying slow results which are
 	// likely to be the result of other activity on the machine.
@@ -95,27 +132,118 @@ inline int time_lines(CacheLine::arr lines, unsigned long numbersOfWays,
 	return median_time;
 }
 
-int SetTester::time(unsigned int count) {
-	switch (rand() % 3) {
-	case 0:
-		return time1(count);
-	case 1:
-		return time2(count);
-	case 2:
-		return time3(count);
-	default:
-		return time3(count);
+inline bool isOnSameSetAsTheFirst(CacheLine::arr lines, unsigned long size,
+		unsigned long runs, int llcMaxAccessTime) __attribute__((always_inline));
+
+inline bool isOnSameSetAsTheFirst(CacheLine::arr lines, unsigned long size,
+		unsigned long runs, int llcMaxAccessTime) {
+	int times[runs];
+	unsigned int loc = rand() % DUMMY_SIZE;
+
+//	clearLines(lines, size);
+
+	unsigned int lowerCount = 0;
+	unsigned int higherCount = 0;
+	unsigned long medianPos = runs * 0.5;
+	unsigned long firstTryRuns = runs * 0.6;
+	unsigned long secondTryRuns = runs * 0.2;
+
+	time_lines_safe(lines, size, loc, times, firstTryRuns);
+	for (unsigned long run = 0; run < firstTryRuns; run++) {
+		if(times[run] > llcMaxAccessTime) {
+			higherCount += 1;
+		} else {
+			lowerCount += 1;
+		}
+	}
+
+	if(higherCount >= medianPos) {
+		return true;
+	} else if(lowerCount > medianPos) {
+		return false;
+	}
+
+	time_lines_safe(lines, size, loc, times+firstTryRuns, secondTryRuns);
+	for (unsigned long run = firstTryRuns; run < firstTryRuns+secondTryRuns; run++) {
+		if(times[run] > llcMaxAccessTime) {
+			higherCount += 1;
+		} else {
+			lowerCount += 1;
+		}
+	}
+
+	if(higherCount >= medianPos) {
+		return true;
+	} else if(lowerCount > medianPos) {
+		return false;
+	}
+
+	time_lines_safe(lines, size, loc, times+firstTryRuns+secondTryRuns, runs-firstTryRuns-secondTryRuns);
+	for (unsigned long run = firstTryRuns+secondTryRuns; run < runs; run++) {
+		if(times[run] > llcMaxAccessTime) {
+			higherCount += 1;
+		} else {
+			lowerCount += 1;
+		}
+	}
+
+	if(higherCount >= medianPos) {
+		return true;
+	} else {
+		return false;
 	}
 }
 
-int SetTester::time1(unsigned int count) {
-	return time_lines(testLines, count, runs + 1);
+bool SetTester::isOnSameSet(unsigned int count) {
+	switch(rand() % 3) {
+	case 0:
+		return isOnSameSetAsTheFirst(testLines, count, runs, llcMaxAccessTime);
+	case 1:
+		return isOnSameSetAsTheFirst(testLines, count, runs+2, llcMaxAccessTime);
+	case 2:
+	default:
+		return isOnSameSetAsTheFirst(testLines, count, runs+4, llcMaxAccessTime);
+	}
+//	return double(time(count)) > avgMed * anomalyFactor;
 }
 
-int SetTester::time2(unsigned int count) {
-	return time_lines(testLines, count, runs + 2);
+int SetTester::time(unsigned int count) {
+	return time_lines(testLines, count, runs);
 }
 
-int SetTester::time3(unsigned int count) {
-	return time_lines(testLines, count, runs + 3);
+int SetTester::timeMiss(CacheLine::ptr line) {
+	return time_line_miss_access(line, runs);
+}
+
+CacheLine::vec SetTester::getSameSetGroup(unsigned int availableWays) {
+	CacheLine::vec res;
+
+	if(!isOnSameSet()) {
+		return res;
+	}
+
+	// We only measure the first line access so,
+	// it must be in the same set as some of the others
+	unsigned int foundCount = 1;
+
+	// If the amount of tested lines is exactly one more then the available ways,
+	// then we know that all the group is in the same set, not need to check again.
+	if(testLinesCount == availableWays+1) {
+		foundCount = availableWays;
+	} else {
+		// For each u: if without u the access time is short, then it is part of the set
+		for(unsigned int u=testLinesCount-1; u >= foundCount && foundCount < availableWays; u--) {
+			if(!isOnSameSet(u)) {
+				swap(foundCount, u);
+				foundCount++;
+				u++;
+			}
+		}
+	}
+
+	if(foundCount >= availableWays) {
+		res.insert(res.begin(), testLines, testLines + foundCount);
+	}
+
+	return res;
 }

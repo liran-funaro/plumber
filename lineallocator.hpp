@@ -132,7 +132,10 @@ private:
 public:
 
 	CacheLine::lst getSet(int set, unsigned int count);
-	CacheLine::lst getAllSets(unsigned int countPerSet);
+	CacheLine::lst getSets(unsigned int beginSet, unsigned int endSet, unsigned int countPerSet);
+	CacheLine::lst getAllSets(unsigned int countPerSet) {
+		return getSets(0, getSetsCount(), countPerSet);
+	}
 
 	void allocateAllSets();
 	void rePartitionSets();

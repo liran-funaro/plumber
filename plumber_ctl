@@ -33,6 +33,8 @@ if [ $1 == "start" ]; then
 elif [ $1 == "cache" ]; then
 	shift
 	echo $1     | sudo tee -a $CACHE        > /dev/null
+elif [ $1 == "get-cache" ]; then
+	cat $CACHE
 elif [ $1 == "log" ]; then
 	sudo tail -f /tmp/plumber.log
 elif [ $1 == "pid" ]; then
