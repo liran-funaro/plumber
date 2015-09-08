@@ -12,83 +12,82 @@ MIGRATE=$CPU_GRP/cpuset.memory_migrate
 CACHE=$RDT_GRP/intel_rdt.cache_mask
 OTHERS_CACHE=$CGROUP/intel_rdt/intel_rdt.cache_mask
 
-if [ $1 == "start" ]; then
-	shift
+op=$1
+shift
 
-	# Create cgroups
-	sudo mkdir -p $CPU_GRP
-	sudo mkdir -p $RDT_GRP
+case "$op" in
+	start)
+		# Create cgroups
+		sudo mkdir -p $CPU_GRP
+		sudo mkdir -p $RDT_GRP
 
-	# Setup cgroups
-	echo 11,35   | sudo tee -a $CPUS         > /dev/null
-	echo 0       | sudo tee -a $MEMS         > /dev/null
-	echo 1       | sudo tee -a $MIGRATE      > /dev/null
-	echo 0x3     | sudo tee -a $CACHE        > /dev/null
+		# Setup cgroups
+		echo 11,35   | sudo tee -a $CPUS         > /dev/null
+		echo 0       | sudo tee -a $MEMS         > /dev/null
+		echo 1       | sudo tee -a $MIGRATE      > /dev/null
+		echo 0x3     | sudo tee -a $CACHE        > /dev/null
 
-	# Start plumber
-	sudo cgexec -g cpuset,intel_rdt:plumber sudo ./Release/plumber $@
-	
-	sleep 1
-	echo "Deamon PID: $(pidof plumber)"
-elif [ $1 == "cache" ]; then
-	shift
-	echo $1     | sudo tee -a $CACHE        > /dev/null
-elif [ $1 == "cpus" ]; then
-	shift
-	echo $1     | sudo tee -a $CPUS        > /dev/null
-elif [ $1 == "get-alloc" ]; then
-	echo "Plumber CPUs allocation: $(cat $CPUS)"
-	echo "Plumber cache allocation: $(cat $CACHE)"
-elif [ $1 == "log" ]; then
-	sudo tail -f /tmp/plumber.log
-elif [ $1 == "pid" ]; then
-	pids=$(pidof plumber)
-	echo "$(pidof plumber | tr ' ' ,) (${#pids[@]})"
-elif [ $1 == "kill" ]; then
-	echo q | sudo tee -a $"/tmp/plumber" & > /dev/null
-	sleep 1
-	sudo kill -9 $(pidof plumber)
-	pids=$(pidof plumber)
-	echo "PIDs count: ${#pids[@]}"
-elif [ $1 == "perf-touch" ]; then
-	shift
-	timeSec=$1
-	shift
-	echo "touch $@" | sudo tee -a $"/tmp/plumber" > /dev/null
+		# Start plumber
+		sudo cgexec -g cpuset,intel_rdt:plumber sudo ./Release/plumber $@
+		
+		sleep 1
+		echo "Deamon PID: $(pidof plumber)"
+		;;
+	cache) echo $1     | sudo tee -a $CACHE        > /dev/null ;;
+	cpus)  echo $1     | sudo tee -a $CPUS        > /dev/null  ;;
+	get-alloc)
+		echo "Plumber CPUs allocation: $(cat $CPUS)"
+		echo "Plumber cache allocation: $(cat $CACHE)"
+		;;
+	log) sudo tail -f /tmp/plumber.log ;;
+	pid)
+		pids=$(pidof plumber)
+		echo "$(pidof plumber | tr ' ' ,) (${#pids[@]})"
+		;;
+	kill)
+		echo q | sudo tee -a $"/tmp/plumber" & > /dev/null
+		sleep 1
+		sudo kill -9 $(pidof plumber)
+		pids=$(pidof plumber)
+		echo "PIDs count: ${#pids[@]}"
+		;;
+	perf-touch)
+		timeSec=$1
+		shift
+		echo "touch $@" | sudo tee -a $"/tmp/plumber" > /dev/null
 
-	cd ~/workspace/linux/tools/perf
+		cd ~/workspace/linux/tools/perf
 
-	sleep 15
-	echo "Start perf-stat"
-	sudo ./perf stat \
-		-e LLC-loads-misses:u,LLC-loads:u \
-		-e L1-dcache-loads:u,L1-dcache-load-misses:u \
-		-p $(pidof plumber | tr ' ' ,) \
-		-c sleep ${timeSec}
- 
-	echo "touch stop" | sudo tee -a $"/tmp/plumber" > /dev/null
-elif [ $1 == "perf-stat" ]; then
-	shift
-	timeSec=$1
-	shift
+		sleep 15
+		echo "Start perf-stat"
+		sudo ./perf stat \
+			-e LLC-loads-misses:u,LLC-loads:u \
+			-e L1-dcache-loads:u,L1-dcache-load-misses:u \
+			-p $(pidof plumber | tr ' ' ,) \
+			-c sleep ${timeSec}
+	 
+		echo "touch stop" | sudo tee -a $"/tmp/plumber" > /dev/null
+		;;
+	perf-stat)
+		timeSec=$1
+		shift
 
-	cd ~/workspace/linux/tools/perf
+		cd ~/workspace/linux/tools/perf
 
-	sudo ./perf stat $@ \
-		-e LLC-loads-misses:u,LLC-loads:u \
-		-e L1-dcache-loads:u,L1-dcache-load-misses:u \
-		-p $(pidof plumber | tr ' ' ,) \
-		-c sleep ${timeSec}
-elif [ $1 == "perf-top" ]; then
-	shift
+		sudo ./perf stat $@ \
+			-e LLC-loads-misses:u,LLC-loads:u \
+			-e L1-dcache-loads:u,L1-dcache-load-misses:u \
+			-p $(pidof plumber | tr ' ' ,) \
+			-c sleep ${timeSec}
+		;;
+	perf-top)
+		cd ~/workspace/linux/tools/perf
 
-	cd ~/workspace/linux/tools/perf
-
-	sudo ./perf top \
-		-e LLC-loads-misses:u,LLC-loads:u \
-		-e L1-dcache-loads:u,L1-dcache-load-misses:u \
-		-e cycles:u \
-		-p $(pidof plumber | tr ' ' ,)
-else
-	echo $@ | sudo tee -a $"/tmp/plumber" > /dev/null
-fi
+		sudo ./perf top \
+			-e LLC-loads-misses:u,LLC-loads:u \
+			-e L1-dcache-loads:u,L1-dcache-load-misses:u \
+			-e cycles:u \
+			-p $(pidof plumber | tr ' ' ,)
+		;;
+	*) echo $op $@ | sudo tee -a $"/tmp/plumber" > /dev/null ;;
+esac
