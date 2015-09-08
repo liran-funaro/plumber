@@ -58,27 +58,32 @@ unsigned long getNumberArgument(int argc, const char* argv[], unsigned long defa
 		if (cmparg(argv[i], option1, option2)) {
 			if(++i >= argc) break;
 			istringstream ( argv[i] ) >> defaultValue;
+			break;
 		}
-		break;
 	}
 
+	std::cout << "Option: " << option1 << ": " << defaultValue << endl;
 	return defaultValue;
 }
 
 bool getBoolArgument(int argc, const char* argv[],
 		const char* option1, const char* option2 = NULL) {
+	bool res = false;
 	for(int i = 1; i < argc; i++) {
 		if (cmparg(argv[i], option1, option2)) {
-			return true;
+			res = true;
+			break;
 		}
 	}
 
-	return false;
+	std::cout << "Option: " << option1 << ": " << (res ? "true" : "false") << endl;
+	return res;
 }
 
 int main(int argc, const char* argv[]) {
 	auto linesPerSet   = getNumberArgument(argc, argv, 0, "--lines-per-set", "-l");  // According to actual ways in the CPU
 	auto availableWays = getNumberArgument(argc, argv, 2, "--ways",          "-w");
+	auto workersCount  = getNumberArgument(argc, argv, 1, "--workers",       "-t");
 	auto deamonize     = getBoolArgument  (argc, argv,    "--deamon",        "-d");
 	auto verbose       = getBoolArgument  (argc, argv,    "--verbose",       "-v");
 	auto doBenchmark   = getBoolArgument  (argc, argv,    "--benchmark");
@@ -117,8 +122,12 @@ int main(int argc, const char* argv[]) {
 		// Message Loop
 		////////////////////////////////////////////////////////////////////////
 		Messages msg(queue_fifo);
-		TouchWorker touch(a);
-		touch.startTouchThread();
+		TouchWorker* workers[workersCount];
+
+		for(unsigned int i=0; i < workersCount; i++) {
+			workers[i] = new TouchWorker(a);
+			workers[i]->startTouchThread();
+		}
 
 		while(msg.readQueue()) {
 			try {
@@ -128,12 +137,15 @@ int main(int argc, const char* argv[]) {
 				if(op == "q" || op == "quit") {
 					return 0;
 				} else if(op == "t" || op == "touch") {
-					auto t = touch.defaultInfo();
+					auto t = workers[0]->defaultInfo();
+					unsigned int multiWorkers = 1;
 
 					while(msg.haveTokens()) {
 						string touchOp = msg.popStringToken();
-						if(touchOp == "set" || touchOp == "s") {
-							t.touchSet = msg.popNumberToken();
+						if(touchOp == "begin-set" || touchOp == "bs") {
+							t.beginSet = msg.popNumberToken();
+						} if(touchOp == "end-set" || touchOp == "es") {
+							t.endSet = msg.popNumberToken();
 						} else if(touchOp == "lines" || touchOp == "l") {
 							t.touchLinesPerSet = msg.popNumberToken();
 						} else if(touchOp == "partitions" || touchOp == "p") {
@@ -148,13 +160,28 @@ int main(int argc, const char* argv[]) {
 							t.flushBefore = true;
 						} else if(touchOp == "flush-after") {
 							t.flushAfter = true;
+						}  else if(touchOp == "multi" || touchOp == "m") {
+							multiWorkers = msg.popNumberToken();
 						} else {
 							throw UnknownOperation(op + " " + touchOp);
 						}
 					}
 
 					if(t.op == TouchInfo::OP_TOUCH || t.op == TouchInfo::OP_FLUSH) {
-						touch.sendJob(t);
+						if(multiWorkers > workersCount) {
+							throw UnknownOperation("Multi workers must be less then workers count");
+						}
+						if( (t.endSet - t.beginSet + 1) % multiWorkers != 0) {
+							throw UnknownOperation("Workers multiplicity must divide the sets count");
+						}
+						unsigned int chunk = (t.endSet - t.beginSet + 1) / multiWorkers;
+						t.endSet = t.beginSet + chunk - 1;
+
+						for(unsigned int i=0; i < multiWorkers; i++) {
+							workers[i]->sendJob(t);
+							t.beginSet += chunk;
+							t.endSet += chunk;
+						}
 					} else if(t.op == TouchInfo::OP_STOP) {
 						TouchWorker::touchForever = false;
 					}
@@ -166,7 +193,8 @@ int main(int argc, const char* argv[]) {
 			} catch (UnknownOperation& e) {
 				std::cout << "[MSG ERROR] " << e.what() << ": " << e.op() << endl;
 			} catch (Busy& e) {
-				std::cout << "[BUSY] Already running a touch work" << endl;
+				std::cout << "[BUSY] Already running a touch work. Will stop it." << endl;
+				TouchWorker::touchForever = false;
 			}
 		}
 	} catch (exception& e) {

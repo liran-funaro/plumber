@@ -41,7 +41,8 @@ using Line = CacheLine;
 class Busy : exception {};
 
 typedef struct TouchInfo {
-	volatile int touchSet;
+	volatile int beginSet;
+	volatile int endSet;
 	volatile unsigned int touchLinesPerSet;
 	volatile unsigned long partitions;
 	volatile bool disableInterupts;
@@ -54,7 +55,7 @@ typedef struct TouchInfo {
 } TouchInfo;
 
 class TouchWorker {
-public:
+private:
 	Allocator& allocator;
 	volatile Line::arr partitionsArray;
 
@@ -63,6 +64,7 @@ public:
 	pthread_mutex_t mutex;
 	pthread_cond_t cv;
 
+public:
 	volatile static bool touchForever;
 
 public:
@@ -76,10 +78,11 @@ public:
 		discardPartitionsArray();
 	}
 
-	static TouchInfo defaultInfo() {
+	TouchInfo defaultInfo() {
 		TouchInfo res;
 		res.op = TouchInfo::OP_TOUCH;
-		res.touchSet 		 = -1;		// All sets
+		res.beginSet 		 = 0;
+		res.endSet	 		 = allocator.getSetsCount()-1;
 		res.touchLinesPerSet = 1;
 		res.partitions		 = 1;
 		res.disableInterupts = false;
@@ -120,11 +123,7 @@ public:
 		Line::lst lineList;
 
 		try {
-			if(inputInfo.touchSet < 0) {
-				lineList = allocator.getAllSets(info.touchLinesPerSet);
-			} else {
-				lineList = allocator.getSet(info.touchSet, info.touchLinesPerSet);
-			}
+			lineList = allocator.getSets(info.beginSet, info.endSet, info.touchLinesPerSet);
 			length = lineList.size();
 			auto partitions = lineList.partition(info.partitions);
 			allocatePartitionsArray(partitions);

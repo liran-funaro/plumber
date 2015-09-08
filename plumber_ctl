@@ -33,8 +33,12 @@ if [ $1 == "start" ]; then
 elif [ $1 == "cache" ]; then
 	shift
 	echo $1     | sudo tee -a $CACHE        > /dev/null
-elif [ $1 == "get-cache" ]; then
-	cat $CACHE
+elif [ $1 == "cpus" ]; then
+	shift
+	echo $1     | sudo tee -a $CPUS        > /dev/null
+elif [ $1 == "get-alloc" ]; then
+	echo "Plumber CPUs allocation: $(cat $CPUS)"
+	echo "Plumber cache allocation: $(cat $CACHE)"
 elif [ $1 == "log" ]; then
 	sudo tail -f /tmp/plumber.log
 elif [ $1 == "pid" ]; then
@@ -70,7 +74,7 @@ elif [ $1 == "perf-stat" ]; then
 
 	cd ~/workspace/linux/tools/perf
 
-	sudo ./perf stat \
+	sudo ./perf stat $@ \
 		-e LLC-loads-misses:u,LLC-loads:u \
 		-e L1-dcache-loads:u,L1-dcache-load-misses:u \
 		-p $(pidof plumber | tr ' ' ,) \

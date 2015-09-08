@@ -86,8 +86,9 @@ unsigned long CacheLine::calculatePhyscialAddr() const {
 void CacheLine::flushSets() {
 	ptr curline = this;
 	do {
+		ptr nextline = curline->getNext();
 		curline->flushFromCache();
-		curline = curline->getNext();
+		curline = nextline;
 	} while (curline != this);
 }
 

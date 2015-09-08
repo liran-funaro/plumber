@@ -60,6 +60,7 @@ inline int time_last_access(CacheLine::arr lines, unsigned long size, unsigned i
 		__attribute__((always_inline));
 inline int time_last_access(CacheLine::arr lines, unsigned long size, unsigned int loc) {
 	clearLines(lines, size);
+
 	// Ensure the first address is cached by accessing it.
 	g_dummy[loc] += *(volatile int *) lines[0];
 	mfence();
@@ -142,56 +143,31 @@ inline bool isOnSameSetAsTheFirst(CacheLine::arr lines, unsigned long size,
 
 //	clearLines(lines, size);
 
-	unsigned int lowerCount = 0;
 	unsigned int higherCount = 0;
-	unsigned long medianPos = runs * 0.5;
-	unsigned long firstTryRuns = runs * 0.6;
-	unsigned long secondTryRuns = runs * 0.2;
 
-	time_lines_safe(lines, size, loc, times, firstTryRuns);
-	for (unsigned long run = 0; run < firstTryRuns; run++) {
-		if(times[run] > llcMaxAccessTime) {
-			higherCount += 1;
-		} else {
-			lowerCount += 1;
+	const double highSafeFactor = 0.75;
+	const double lowSafeFactor = 1. - highSafeFactor;
+	const unsigned int maxRetries = 16;
+	unsigned long totalRuns = 0;
+
+	for(unsigned int i=0; i < maxRetries; i++) {
+		time_lines_safe(lines, size, loc, times, runs);
+		totalRuns += runs;
+		for (unsigned long run = 0; run < runs; run++) {
+			if(times[run] > llcMaxAccessTime) {
+				higherCount += 1;
+			}
+		}
+
+		if(higherCount > totalRuns*highSafeFactor) {
+			return true;
+		} else if(higherCount < totalRuns*lowSafeFactor) {
+			return false;
 		}
 	}
 
-	if(higherCount >= medianPos) {
-		return true;
-	} else if(lowerCount > medianPos) {
-		return false;
-	}
-
-	time_lines_safe(lines, size, loc, times+firstTryRuns, secondTryRuns);
-	for (unsigned long run = firstTryRuns; run < firstTryRuns+secondTryRuns; run++) {
-		if(times[run] > llcMaxAccessTime) {
-			higherCount += 1;
-		} else {
-			lowerCount += 1;
-		}
-	}
-
-	if(higherCount >= medianPos) {
-		return true;
-	} else if(lowerCount > medianPos) {
-		return false;
-	}
-
-	time_lines_safe(lines, size, loc, times+firstTryRuns+secondTryRuns, runs-firstTryRuns-secondTryRuns);
-	for (unsigned long run = firstTryRuns+secondTryRuns; run < runs; run++) {
-		if(times[run] > llcMaxAccessTime) {
-			higherCount += 1;
-		} else {
-			lowerCount += 1;
-		}
-	}
-
-	if(higherCount >= medianPos) {
-		return true;
-	} else {
-		return false;
-	}
+	// Fallback. Better safe then sorry.
+	return false;
 }
 
 bool SetTester::isOnSameSet(unsigned int count) {
