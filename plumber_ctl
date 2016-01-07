@@ -98,8 +98,6 @@ case "$op" in
 		timeSec=$1
 		shift
 
-		cd ~/workspace/linux/tools/perf
-
 		sudo .$PERF stat $@ \
 			-e LLC-loads-misses:u,LLC-loads:u \
 			-e L1-dcache-loads:u,L1-dcache-load-misses:u \
@@ -107,8 +105,6 @@ case "$op" in
 			-c sleep ${timeSec}
 		;;
 	perf-top)
-		cd ~/workspace/linux/tools/perf
-
 		sudo $PERF top \
 			-e LLC-loads-misses:u,LLC-loads:u \
 			-e L1-dcache-loads:u,L1-dcache-load-misses:u \
