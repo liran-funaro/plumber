@@ -2,15 +2,18 @@
 
 CGROUP=/sys/fs/cgroup
 CPU_GRP=$CGROUP/cpuset/plumber
-RDT_GRP=$CGROUP/intel_rdt/plumber
+# RDT_GRP=$CGROUP/intel_rdt/plumber
 
 CPUS=$CPU_GRP/cpuset.cpus
 MEMS=$CPU_GRP/cpuset.mems
 CPU_EXC=$CPU_GRP/cpuset.cpu_exclusive
 MIGRATE=$CPU_GRP/cpuset.memory_migrate
 
-CACHE=$RDT_GRP/intel_rdt.cache_mask
-OTHERS_CACHE=$CGROUP/intel_rdt/intel_rdt.cache_mask
+MOC=~/workspace/moc
+PERF=~/bin/perf
+CACHE_DRIVER="python $MOC/etc/cache_driver.py"
+# CACHE=$RDT_GRP/intel_rdt.cache_mask
+# OTHERS_CACHE=$CGROUP/intel_rdt/intel_rdt.cache_mask
 
 op=$1
 shift
@@ -19,26 +22,35 @@ case "$op" in
 	start)
 		# Create cgroups
 		sudo mkdir -p $CPU_GRP
-		sudo mkdir -p $RDT_GRP
+		# sudo mkdir -p $RDT_GRP
 
 		# Setup cgroups
 		echo 11,35   | sudo tee -a $CPUS         > /dev/null
 		echo 0       | sudo tee -a $MEMS         > /dev/null
 		echo 1       | sudo tee -a $MIGRATE      > /dev/null
-		echo 0x3     | sudo tee -a $CACHE        > /dev/null
+		# echo 0x3     | sudo tee -a $CACHE        > /dev/null
 
 		# Start plumber
-		sudo cgexec -g cpuset,intel_rdt:plumber sudo ./Release/plumber $@
+		# sudo cgexec -g cpuset,intel_rdt:plumber sudo ./Release/plumber $@
+		for c in 11 35; do
+			$CACHE_DRIVER -C $c 1
+		done
+		$CACHE_DRIVER -A 1 0 1
+
+		for c in 0 24 1 25 2 26 3 27 4 28 5 29 6 30 7 31 8 32 9 33 10 34; do
+			$CACHE_DRIVER -C $c 0
+		done
+		$CACHE_DRIVER -A 0 2 19
+
+		sudo cgexec -g cpuset:plumber sudo ./Release/plumber $@
 		
 		sleep 1
 		echo "Deamon PID: $(pidof plumber)"
 		;;
-	cache) echo $1     | sudo tee -a $CACHE        > /dev/null ;;
+	# cache) echo $1     | sudo tee -a $CACHE        > /dev/null ;;
 	cpus)  echo $1     | sudo tee -a $CPUS        > /dev/null  ;;
-	get-alloc)
-		echo "Plumber CPUs allocation: $(cat $CPUS)"
-		echo "Plumber cache allocation: $(cat $CACHE)"
-		;;
+	get-cpus) cat $CPUS ;;
+	# echo "Plumber cache allocation: $(cat $CACHE)"
 	log) sudo tail -f /tmp/plumber.log ;;
 	pid)
 		pids=$(pidof plumber)
@@ -49,18 +61,32 @@ case "$op" in
 		sleep 1
 		sudo kill -9 $(pidof plumber)
 		pids=$(pidof plumber)
-		echo "PIDs count: ${#pids[@]}"
+		echo "Plumber PIDs: $pids"
+		;;
+	clean)
+		firstWay=$1
+		lastWay=$2
+		lines=$3
+		rmid=$4
+		for c in 0 24 1 25 2 26 3 27 4 28 5 29 6 30 7 31 8 32 9 33 10 34 11 35; do
+			$CACHE_DRIVER -C $c 0
+			$CACHE_DRIVER -R $c $rmid
+		done
+		$CACHE_DRIVER -A 0 $firstWay $lastWay
+
+		echo "touch l $lines flush-before" | sudo tee -a $"/tmp/plumber" > /dev/null
+		sleep 20
+		echo "touch stop" | sudo tee -a $"/tmp/plumber" > /dev/null
+		$CACHE_DRIVER -o $rmid
 		;;
 	perf-touch)
 		timeSec=$1
 		shift
 		echo "touch $@" | sudo tee -a $"/tmp/plumber" > /dev/null
 
-		cd ~/workspace/linux/tools/perf
-
 		sleep 15
 		echo "Start perf-stat"
-		sudo ./perf stat \
+		sudo $PERF stat \
 			-e LLC-loads-misses:u,LLC-loads:u \
 			-e L1-dcache-loads:u,L1-dcache-load-misses:u \
 			-p $(pidof plumber | tr ' ' ,) \
@@ -74,7 +100,7 @@ case "$op" in
 
 		cd ~/workspace/linux/tools/perf
 
-		sudo ./perf stat $@ \
+		sudo .$PERF stat $@ \
 			-e LLC-loads-misses:u,LLC-loads:u \
 			-e L1-dcache-loads:u,L1-dcache-load-misses:u \
 			-p $(pidof plumber | tr ' ' ,) \
@@ -83,7 +109,7 @@ case "$op" in
 	perf-top)
 		cd ~/workspace/linux/tools/perf
 
-		sudo ./perf top \
+		sudo $PERF top \
 			-e LLC-loads-misses:u,LLC-loads:u \
 			-e L1-dcache-loads:u,L1-dcache-load-misses:u \
 			-e cycles:u \
