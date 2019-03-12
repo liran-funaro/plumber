@@ -1,18 +1,21 @@
 /*
- * deamon.cpp
+ * Author: Liran Funaro <liran.funaro@gmail.com>
  *
- *  Created on: Aug 31, 2015
- *      Author: liran
- */
-/*
- * deamon.h
+ * Copyright (C) 2006-2018 Liran Funaro
  *
- *  Created on: Aug 31, 2015
- *      Author: liran
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
-#include "deamon.h"
-
 #include <signal.h>   //signal(3)
 #include <stdio.h>    //printf(3)
 #include <stdlib.h>   //exit(3)
@@ -20,7 +23,10 @@
 #include <sys/stat.h> //umask(3)
 #include <syslog.h>   //syslog(3), openlog(3), closelog(3)
 #include <unistd.h>   //fork(3), chdir(3), sysconf(3)
+
 #include <iostream>
+
+#include "deamon.h"
 
 using namespace std;
 

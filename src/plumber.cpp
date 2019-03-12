@@ -1,10 +1,21 @@
 /*
- * cleancache.cpp
+ * Author: Liran Funaro <liran.funaro@gmail.com>
  *
- *  Created on: Mar 30, 2015
- *      Author: Liran Funaro <fonaro@cs.technion.ac.il>
+ * Copyright (C) 2006-2018 Liran Funaro
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -17,7 +28,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
-
+#include <memory>
 #include <fstream>
 
 #include <sys/types.h>
@@ -122,7 +133,7 @@ int main(int argc, const char* argv[]) {
 		// Message Loop
 		////////////////////////////////////////////////////////////////////////
 		Messages msg(queue_fifo);
-		TouchWorker* workers[workersCount];
+		std::unique_ptr<TouchWorker*[]> workers(new TouchWorker*[workersCount]);
 
 		for(unsigned int i=0; i < workersCount; i++) {
 			workers[i] = new TouchWorker(a);

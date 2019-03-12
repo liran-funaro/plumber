@@ -1,10 +1,21 @@
 /*
- * page.h
+ * Author: Liran Funaro <liran.funaro@gmail.com>
  *
- *  Created on: Mar 30, 2015
- *      Author: Liran Funaro <fonaro@cs.technion.ac.il>
+ * Copyright (C) 2006-2018 Liran Funaro
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
 #include "cacheline.hpp"
 
 ObjectPoll* CacheLine::poll;
@@ -61,8 +72,8 @@ void CacheLine::validateAll() const {
 }
 
 void CacheLine::setCacheSlice(unsigned long _cacheSlice) {
-	if(cacheSlice < 0 || cacheSlice == cacheSlice) {
-		cacheSlice = _cacheSlice;
+	if(cacheSlice < 0){ // || cacheSlice == cacheSlice) {
+		cacheSlice = (int)_cacheSlice;
 	} else {
 		throw CacheSliceResetException(this, cacheSlice, cacheSlice);
 	}
@@ -103,7 +114,8 @@ void CacheLine::polluteSets(CacheLine::arr partitionsArray, unsigned long partit
 
 	while (continueFlag) {
 		for(unsigned long i=0; i < partitionsCount; i++) {
-			partitionsArray[i] = ((volatile CacheLine::ptr) partitionsArray[i])->next;
+			CacheLine::ptr a = *(volatile CacheLine::ptr*) &partitionsArray[i];
+			partitionsArray[i] = a->next;
 		}
 	}
 
@@ -147,7 +159,7 @@ void CacheLine::operator delete(void *p) {
 	}
 }
 
-void* CacheLine::operator new(size_t size) {
+void* CacheLine::operator new(__attribute__((unused)) size_t size) {
 	if(poll == NULL) {
 		return NULL;
 	}

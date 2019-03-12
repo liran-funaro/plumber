@@ -1,9 +1,22 @@
 /*
- * settester.cpp
+ * Author: Liran Funaro <liran.funaro@gmail.com>
  *
- *  Created on: Sep 2, 2015
- *      Author: liran
+ * Copyright (C) 2006-2018 Liran Funaro
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+#include <memory>
 
 #include "timing.h"
 #include "settester.hpp"
@@ -84,7 +97,7 @@ inline int time_miss_access(CacheLine::ptr line, unsigned int loc) {
 
 inline int time_line_miss_access(CacheLine::ptr line, unsigned long runs) __attribute__((always_inline));
 inline int time_line_miss_access(CacheLine::ptr line, unsigned long runs) {
-	int times[runs];
+	std::unique_ptr<int[]> times(new int[runs]);
 	unsigned int loc = rand() % DUMMY_SIZE;
 
 	iopl(3);
@@ -94,7 +107,7 @@ inline int time_line_miss_access(CacheLine::ptr line, unsigned long runs) {
 	}
 	__asm__ __volatile__("sti");
 
-	return *std::min_element(times, times + runs);
+	return *std::min_element(times.get(), times.get() + runs);
 }
 
 inline void time_lines_safe(CacheLine::arr lines, unsigned long size, unsigned int loc,
@@ -114,11 +127,11 @@ inline int time_lines(CacheLine::arr lines, unsigned long size,
 
 inline int time_lines(CacheLine::arr lines, unsigned long size,
 		unsigned long runs) {
-	int times[runs];
+	std::unique_ptr<int[]> times(new int[runs]);
 	unsigned int loc = rand() % DUMMY_SIZE;
 
 	clearLines(lines, size);
-	time_lines_safe(lines, size, loc, times, runs);
+	time_lines_safe(lines, size, loc, times.get(), runs);
 
 	// Find the median time.  We use the median in order to discard
 	// outliers.  We want to discard outlying slow results which are
@@ -127,7 +140,7 @@ inline int time_lines(CacheLine::arr lines, unsigned long size,
 	// We also want to discard outliers where memory was accessed
 	// unusually quickly.  These could be the result of the CPU's
 	// eviction policy not using an exact LRU policy.
-	std::sort(times, &times[runs]);
+	std::sort(times.get(), &times[runs]);
 	int median_time = times[runs / 2];
 
 	return median_time;
@@ -138,7 +151,7 @@ inline bool isOnSameSetAsTheFirst(CacheLine::arr lines, unsigned long size,
 
 inline bool isOnSameSetAsTheFirst(CacheLine::arr lines, unsigned long size,
 		unsigned long runs, int llcMaxAccessTime) {
-	int times[runs];
+	std::unique_ptr<int[]> times(new int[runs]);
 	unsigned int loc = rand() % DUMMY_SIZE;
 
 //	clearLines(lines, size);
@@ -151,7 +164,7 @@ inline bool isOnSameSetAsTheFirst(CacheLine::arr lines, unsigned long size,
 	unsigned long totalRuns = 0;
 
 	for(unsigned int i=0; i < maxRetries; i++) {
-		time_lines_safe(lines, size, loc, times, runs);
+		time_lines_safe(lines, size, loc, times.get(), runs);
 		totalRuns += runs;
 		for (unsigned long run = 0; run < runs; run++) {
 			if(times[run] > llcMaxAccessTime) {

@@ -1,10 +1,21 @@
 /*
- * ObjectPoll.h
+ * Author: Liran Funaro <liran.funaro@gmail.com>
  *
- *  Created on: Sep 1, 2015
- *      Author: liran
+ * Copyright (C) 2006-2018 Liran Funaro
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
 #ifndef OBJECTPOLL_H_
 #define OBJECTPOLL_H_
 
@@ -38,7 +49,7 @@ using namespace std;
 #define ADDR_TO_PTR(addr) ( reinterpret_cast<void*>(addr) )
 
 #define PAGE_MASK(ptr) ( PTR_TO_ADDR(ptr) & ( (1<<12) - 1) )
-#define PAGE_FRAME_MASK(ptr) ADDR_TO_PTR( (PTR_TO_ADDR(ptr) & (~0L<<12)) )
+#define PAGE_FRAME_MASK(ptr) ADDR_TO_PTR( (PTR_TO_ADDR(ptr) & (~0UL<<12)) )
 
 #define ARRAY_LENGTH(arr) ( sizeof(arr) / sizeof( (arr)[0] ) )
 
