@@ -71,7 +71,7 @@ void CacheLineAllocator::allocateAllSets() {
 						bool addressCorrect = (*l)->getPhysicalAddr() == (*l)->calculatePhyscialAddr();
 						if(!addressCorrect) {
 							error = true;
-							VERBOSE("   [CHANGED] 0x" << hex << (*l)->getPhysicalAddr() << " != 0x" << (*l)->calculatePhyscialAddr() << endl);
+							VERBOSE("   [CHANGED] 0x" << hex << (*l)->getPhysicalAddr() << " != 0x" << (*l)->calculatePhyscialAddr() << std::endl);
 						}
 					}
 
@@ -181,9 +181,14 @@ void CacheLineAllocator::clean(unsigned int maxElementsInGroup) {
 	}
 }
 
-void CacheLineAllocator::write() {
-	char filename[512];
-	sprintf(filename, "/home/fonaro/workspace/result/lineallocator-%llu.txt", rdtsc());
+void CacheLineAllocator::write(const char* path) {
+	char filename[1024];
+	auto l = strlen(path);
+	strncpy(filename, path, l);
+	if (filename[l-1] != '/')
+		filename[l++] = '/';
+	sprintf(filename+l, "lineallocator-%llu.txt", rdtsc());
+
 	ofstream outputfile;
 	outputfile.open(filename);
 	outputfile << "#SET;SLICE;ADDR" << endl;
@@ -191,11 +196,11 @@ void CacheLineAllocator::write() {
 	for(auto s = linesSets.begin(); s != linesSets.end(); s++) {
 		auto& curSliceSet = s->second;
 
-		for(auto i=curSliceSet.begin(); i != curSliceSet.end(); ++i) {
+		for (auto i = curSliceSet.begin(); i != curSliceSet.end(); ++i) {
 			outputfile << std::hex
 					<< (*i)->getSet() << ";"
 					<< (*i)->getCacheSlice() << ";"
-					<< (*i)->getPhysicalAddr() << endl;
+					<< (*i)->getPhysicalAddr() << std::endl;
 		}
 	}
 

@@ -19,6 +19,7 @@
 #ifndef TOUCHWORKER_HPP_
 #define TOUCHWORKER_HPP_
 
+#include <daemon.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -40,8 +41,6 @@
 
 #include "Messages.h"
 #include "lineallocator.hpp"
-#include "deamon.h"
-
 #include "timing.h"
 
 using namespace std;

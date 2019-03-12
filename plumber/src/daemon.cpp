@@ -26,7 +26,8 @@
 
 #include <iostream>
 
-#include "deamon.h"
+#include "daemon.h"
+
 
 using namespace std;
 
@@ -100,11 +101,11 @@ int daemonize(const char* name, const char* infile, const char* outfile) {
 
 	//open syslog
 	openlog(name, LOG_PID, LOG_DAEMON);
-	syslog(LOG_NOTICE,"Deamon started");
+	syslog(LOG_NOTICE,"Daemon started");
 
 	return ret;
 }
 
-void finilize_deamon() {
+void finilize_daemon() {
 	closelog();
 }

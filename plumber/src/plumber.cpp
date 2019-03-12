@@ -35,10 +35,9 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#include "../include/daemon.h"
 #include "Messages.h"
 #include "lineallocator.hpp"
-#include "deamon.h"
-
 #include "timing.h"
 #include "TouchWorker.hpp"
 
@@ -77,6 +76,20 @@ unsigned long getNumberArgument(int argc, const char* argv[], unsigned long defa
 	return defaultValue;
 }
 
+const char* getStringArgument(int argc, const char* argv[], const char* defaultValue,
+		const char* option1, const char* option2 = NULL) {
+	for(int i = 1; i < argc; i++) {
+		if (cmparg(argv[i], option1, option2)) {
+			if(++i >= argc) break;
+			defaultValue = argv[i];
+			break;
+		}
+	}
+
+	std::cout << "Option: " << option1 << ": " << defaultValue << endl;
+	return defaultValue;
+}
+
 bool getBoolArgument(int argc, const char* argv[],
 		const char* option1, const char* option2 = NULL) {
 	bool res = false;
@@ -92,10 +105,12 @@ bool getBoolArgument(int argc, const char* argv[],
 }
 
 int main(int argc, const char* argv[]) {
-	auto linesPerSet   = getNumberArgument(argc, argv, 0, "--lines-per-set", "-l");  // According to actual ways in the CPU
+	// According to actual ways in the CPU
+	auto linesPerSet   = getNumberArgument(argc, argv, 0, "--lines-per-set", "-l");
 	auto availableWays = getNumberArgument(argc, argv, 2, "--ways",          "-w");
 	auto workersCount  = getNumberArgument(argc, argv, 1, "--workers",       "-t");
-	auto deamonize     = getBoolArgument  (argc, argv,    "--deamon",        "-d");
+	auto path          = getStringArgument(argc, argv,    "--path",          "-p");
+	auto deamonize     = getBoolArgument  (argc, argv,    "--daemon",        "-d");
 	auto verbose       = getBoolArgument  (argc, argv,    "--verbose",       "-v");
 	auto doBenchmark   = getBoolArgument  (argc, argv,    "--benchmark");
 	auto fake 		   = getBoolArgument  (argc, argv,    "--fake");
@@ -123,7 +138,7 @@ int main(int argc, const char* argv[]) {
 		double timeMin = (double)duration.tv_sec/60.;
 		std::cout << std::fixed << std::setprecision(2) << dec;
 		std::cout << endl << "Allocation duration: " << timeMin << " Minutes (" << duration.tv_sec << " sec. and " << duration.tv_nsec << " nsec.)" << endl;
-		a.write();
+		a.write(path);
 
 		if(doBenchmark) {
 			return 0;
@@ -214,7 +229,7 @@ int main(int argc, const char* argv[]) {
 	}
 
 	if(deamonize) {
-		finilize_deamon();
+		finilize_daemon();
 	}
 
 	return ret;

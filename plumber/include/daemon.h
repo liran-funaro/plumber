@@ -20,6 +20,6 @@
 #define PLUMBER_DEAMON_H_
 
 int daemonize(const char* name, const char* infile, const char* outfile);
-void finilize_deamon();
+void finilize_daemon();
 
 #endif /* PLUMBER_DEAMON_H_ */

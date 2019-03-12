@@ -153,7 +153,7 @@ public:
 	const CacheLine::uset& allocateSet(unsigned long set, unsigned long count);
 
 	void print() const;
-	void write();
+	void write(const char* path);
 };
 
 #endif /* PLUMBER_LINEALLOCATOR_HPP_ */
