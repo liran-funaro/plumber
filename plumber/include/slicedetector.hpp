@@ -43,8 +43,6 @@
 #define LLC 3
 using namespace std;
 
-void flushLLC(bool verbose);
-
 class NeedMoreLinesException : public exception {
 	const char* _what;
 public:

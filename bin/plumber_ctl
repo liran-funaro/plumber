@@ -41,6 +41,7 @@ case "$op" in
 		# sudo mkdir -p $RDT_GRP
 
 		# Setup cgroups
+		# HARD-CODED: Xeon(R) E5-2658 v3
 		echo 11,35   | sudo tee -a $CPUS         > /dev/null
 		echo 0       | sudo tee -a $MEMS         > /dev/null
 		echo 1       | sudo tee -a $MIGRATE      > /dev/null
@@ -48,14 +49,18 @@ case "$op" in
 
 		# Start plumber
 		# sudo cgexec -g cpuset,intel_rdt:plumber sudo ./bin/plumber $@
+		# HARD-CODED: Xeon(R) E5-2658 v3
 		for c in 11 35; do
 			$CACHE_DRIVER -C $c 1
 		done
+		# HARD-CODED: Xeon(R) E5-2658 v3
 		$CACHE_DRIVER -A 1 0 1
 
+		# HARD-CODED: Xeon(R) E5-2658 v3
 		for c in 0 24 1 25 2 26 3 27 4 28 5 29 6 30 7 31 8 32 9 33 10 34; do
 			$CACHE_DRIVER -C $c 0
 		done
+		# HARD-CODED: Xeon(R) E5-2658 v3
 		$CACHE_DRIVER -A 0 2 19
 
 		sudo cgexec -g cpuset:plumber sudo ./bin/plumber $@
@@ -84,6 +89,7 @@ case "$op" in
 		lastWay=$2
 		lines=$3
 		rmid=$4
+		# HARD-CODED: Xeon(R) E5-2658 v3
 		for c in 0 24 1 25 2 26 3 27 4 28 5 29 6 30 7 31 8 32 9 33 10 34 11 35; do
 			$CACHE_DRIVER -C $c 0
 			$CACHE_DRIVER -R $c $rmid

@@ -73,9 +73,9 @@ void CacheInfo::init(unsigned int id) {
 	total_size = ways_of_associativity * physical_line_partitions
 			* coherency_line_size * sets;
 
-	// TODO: HARD CODED - detect
+	// HARD-CODED: Xeon(R) E5-2658 v3
+	// TODO: detect using CPUID
 	cache_slices = 12;
-
 }
 
 CacheInfo CacheInfo::getCacheLevel(int level) {
