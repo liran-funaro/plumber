@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# Author: Liran Funaro <liran.funaro@gmail.com>
+#
+# Copyright (C) 2006-2018 Liran Funaro
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 CGROUP=/sys/fs/cgroup
 CPU_GRP=$CGROUP/cpuset/plumber
 # RDT_GRP=$CGROUP/intel_rdt/plumber
@@ -9,9 +26,8 @@ MEMS=$CPU_GRP/cpuset.mems
 CPU_EXC=$CPU_GRP/cpuset.cpu_exclusive
 MIGRATE=$CPU_GRP/cpuset.memory_migrate
 
-MOC=~/workspace/moc
 PERF=~/bin/perf
-CACHE_DRIVER="python $MOC/etc/cache_driver.py"
+CACHE_DRIVER="python -m cache_driver"
 # CACHE=$RDT_GRP/intel_rdt.cache_mask
 # OTHERS_CACHE=$CGROUP/intel_rdt/intel_rdt.cache_mask
 
@@ -31,7 +47,7 @@ case "$op" in
 		# echo 0x3     | sudo tee -a $CACHE        > /dev/null
 
 		# Start plumber
-		# sudo cgexec -g cpuset,intel_rdt:plumber sudo ./Release/plumber $@
+		# sudo cgexec -g cpuset,intel_rdt:plumber sudo ./bin/plumber $@
 		for c in 11 35; do
 			$CACHE_DRIVER -C $c 1
 		done
@@ -42,7 +58,7 @@ case "$op" in
 		done
 		$CACHE_DRIVER -A 0 2 19
 
-		sudo cgexec -g cpuset:plumber sudo ./Release/plumber $@
+		sudo cgexec -g cpuset:plumber sudo ./bin/plumber $@
 		
 		sleep 1
 		echo "Deamon PID: $(pidof plumber)"
