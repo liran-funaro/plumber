@@ -10,7 +10,7 @@ Lookup `HARD-CODED: Xeon(R) E5-2658 v3` in the code to find such cases.
 
 # Requirements
 
-Download and install cat-driver: https://bitbucket.org/funaro/cat-driver
+Download and install cat-driver: https://github.com/liran-funaro/cat-driver
 
 
 # License
